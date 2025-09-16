@@ -1,0 +1,24 @@
+python-dotenv
+pandas 
+numpy
+matplotlib
+plotly
+scikit-learn
+tsfresh
+tensorflow
+keras
+xgboost
+statsforecast 
+utilsforecast
+feature-engine
+meteostat
+holidays
+dill
+pyaml
+mlflow
+dagshub
+fastapi
+uvicorn
+python-multipart
+
+##-e .
