@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 
 from sklearn.impute import KNNImputer
+from sklearn.preprocessing import MinMaxScaler
 from sklearn.pipeline import Pipeline
 from pipeline_prevision.constant.training_pipeline import DATA_TRANSFORMATION_IMPUTER_PARAMS
 from pipeline_prevision.constant.training_pipeline import LOOKBACK, HORIZON
@@ -62,10 +63,11 @@ class DataTransformation:
         try:
            
            imputer:KNNImputer=KNNImputer(**DATA_TRANSFORMATION_IMPUTER_PARAMS)
+           scaler:MinMaxScaler=MinMaxScaler().fit_transform(**DATA_TRANSFORMATION_IMPUTER_PARAMS)
            logging.info(
                 f"Initialise KNNImputer with {DATA_TRANSFORMATION_IMPUTER_PARAMS}"
             )
-           processor:Pipeline=Pipeline([("imputer",imputer)])
+           processor:Pipeline=Pipeline([("imputer", imputer)])
 
            return processor
         
