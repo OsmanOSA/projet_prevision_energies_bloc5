@@ -21,18 +21,19 @@ jobs:
       - name: Run unit tests
         run: echo "Running unit tests"
 
-build-and-push-ecr-image:
-  name: Continuous Delivery
-  needs: integration
-  runs-on: ubuntu latest
-  steps:
+  build-and-push-ecr-image:
+    name: Continuous Delivery
+    needs: integration
+    runs-on: ubuntu-latest
+    steps:
       - name: Checkout Code
         uses: actions/checkout@v3
       
       - name: Install Utilities
-        run: 
+        run: |
           sudo apt-get update
-          sudo apt-get install -y jg unzip
+          sudo apt-get install -y jq unzip
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
