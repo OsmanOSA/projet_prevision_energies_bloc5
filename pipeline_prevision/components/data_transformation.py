@@ -67,7 +67,8 @@ class DataTransformation:
            logging.info(
                 f"Initialise KNNImputer with {DATA_TRANSFORMATION_IMPUTER_PARAMS}"
             )
-           processor:Pipeline=Pipeline([("imputer", imputer)])
+           processor:Pipeline=Pipeline([("imputer", imputer), 
+                                        ("scaler", scaler)])
 
            return processor
         
