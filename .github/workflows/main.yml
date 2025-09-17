@@ -117,6 +117,63 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
       
+      - name: Clean up Docker space before deployment
+        run: |
+          echo "=== Cleaning up Docker space before deployment ==="
+          echo "Disk usage before cleanup:"
+          df -h /
+          df -h /var/lib/docker || true
+          
+          # Stop and remove the existing container if it exists
+          if docker ps -a --format '{{.Names}}' | grep -q '^projet_prevision$'; then
+            echo "Stopping and removing existing container..."
+            docker stop projet_prevision || true
+            docker rm -v projet_prevision || true
+          fi
+          
+          # Remove all stopped containers with their volumes
+          echo "Removing stopped containers..."
+          docker container prune -f || true
+          
+          # Remove unused images (keeping only the last few)
+          echo "Removing unused images..."
+          docker image prune -a -f --filter "until=24h" || true
+          
+          # Remove ALL dangling images
+          echo "Removing dangling images..."
+          docker rmi $(docker images -f "dangling=true" -q) 2>/dev/null || true
+          
+          # Remove unused volumes
+          echo "Removing unused volumes..."
+          docker volume prune -f || true
+          
+          # Remove unused networks
+          echo "Removing unused networks..."
+          docker network prune -f || true
+          
+          # Remove build cache
+          echo "Removing build cache..."
+          docker builder prune -a -f || true
+          
+          # Aggressive cleanup if still low on space (less than 5GB free)
+          AVAILABLE_SPACE=$(df / | awk 'NR==2 {print $4}')
+          if [ "$AVAILABLE_SPACE" -lt 5000000 ]; then
+            echo "WARNING: Less than 5GB available, performing aggressive cleanup..."
+            # Remove ALL images except the base Python image
+            docker images | grep -v "python" | grep -v "REPOSITORY" | awk '{print $3}' | xargs -r docker rmi -f 2>/dev/null || true
+            # Full system prune
+            docker system prune -a -f --volumes || true
+          fi
+          
+          # Show disk usage after cleanup
+          echo "Disk usage after cleanup:"
+          df -h /
+          df -h /var/lib/docker || true
+          
+          # Check Docker disk usage
+          echo "Docker disk usage:"
+          docker system df
+      
       - name: Pull latest images
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
@@ -144,15 +201,6 @@ jobs:
           
           # Pull the image
           docker pull "${FULL_IMAGE_NAME}"
-      
-      - name: Stop and remove container if running
-        run: |
-          # Stop and remove existing container if it exists
-          if docker ps -a --format '{{.Names}}' | grep -q '^projet_prevision$'; then
-            echo "Stopping existing container..."
-            docker stop projet_prevision || true
-            docker rm projet_prevision || true
-          fi
        
       - name: Run Docker Image to serve users
         env:
@@ -194,5 +242,21 @@ jobs:
           
       - name: Clean previous images and containers
         run: |
+          echo "=== Post-deployment cleanup ==="
+          
+          # Keep only the currently running image and remove old ones
+          CURRENT_IMAGE=$(docker ps --filter "name=projet_prevision" --format "{{.Image}}")
+          echo "Current running image: $CURRENT_IMAGE"
+          
+          # Remove old images from the same repository (keep only the latest)
+          echo "Removing old versions of the application image..."
+          docker images | grep "${{ secrets.ECR_REPOSITORY_NAME }}" | grep -v "$CURRENT_IMAGE" | awk '{print $3}' | xargs -r docker rmi -f 2>/dev/null || true
+          
+          # General cleanup
           echo "Cleaning up unused Docker resources..."
-          docker system prune -f
+          docker system prune -f --volumes
+          
+          # Final disk usage report
+          echo "Final disk usage:"
+          df -h /
+          docker system df
