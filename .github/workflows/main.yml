@@ -117,18 +117,82 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
       
-      
       - name: Pull latest images
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY_NAME }}
+          IMAGE_TAG: latest
         run: |
-         docker pull ${{ secrets.AWS_ECR_LOGIN_URI }}/${{ secrets.ECR_REPOSITORY_NAME }}:latest
-         
-      #- name: Stop and remove  container if running
-       # run: |
-        # docker ps -q --filter "name=projet_prevision" | grep -q . && docker stop projet_prevision && docker rm -fv projet_prevision
+          # Trim whitespace from variables
+          ECR_REGISTRY=$(echo "$ECR_REGISTRY" | xargs)
+          ECR_REPOSITORY=$(echo "$ECR_REPOSITORY" | xargs)
+          IMAGE_TAG=$(echo "$IMAGE_TAG" | xargs)
+          
+          echo "Pulling Docker image..."
+          echo "ECR_REGISTRY: '$ECR_REGISTRY'"
+          echo "ECR_REPOSITORY: '$ECR_REPOSITORY'"
+          
+          # Verify that environment variables are set
+          if [ -z "$ECR_REGISTRY" ] || [ -z "$ECR_REPOSITORY" ]; then
+            echo "Error: ECR_REGISTRY or ECR_REPOSITORY is not set"
+            exit 1
+          fi
+          
+          # Construct the full image name
+          FULL_IMAGE_NAME="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          echo "Full image name: '$FULL_IMAGE_NAME'"
+          
+          # Pull the image
+          docker pull "${FULL_IMAGE_NAME}"
+      
+      - name: Stop and remove container if running
+        run: |
+          # Stop and remove existing container if it exists
+          if docker ps -a --format '{{.Names}}' | grep -q '^projet_prevision$'; then
+            echo "Stopping existing container..."
+            docker stop projet_prevision || true
+            docker rm projet_prevision || true
+          fi
        
       - name: Run Docker Image to serve users
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY_NAME }}
+          IMAGE_TAG: latest
         run: |
-         docker run -d -p 8080:8080 --ipc="host" --name=projet_prevision -e 'AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}' -e 'AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}' -e 'AWS_REGION=${{ secrets.AWS_REGION }}'  ${{secrets.AWS_ECR_LOGIN_URI}}/${{ secrets.ECR_REPOSITORY_NAME }}:latest
+          # Trim whitespace from variables
+          ECR_REGISTRY=$(echo "$ECR_REGISTRY" | xargs)
+          ECR_REPOSITORY=$(echo "$ECR_REPOSITORY" | xargs)
+          IMAGE_TAG=$(echo "$IMAGE_TAG" | xargs)
+          
+          # Construct the full image name
+          FULL_IMAGE_NAME="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          
+          echo "Starting container with image: '$FULL_IMAGE_NAME'"
+          
+          # Run the container
+          docker run -d \
+            -p 8080:8080 \
+            --ipc="host" \
+            --name=projet_prevision \
+            --restart unless-stopped \
+            -e "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" \
+            -e "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
+            -e "AWS_REGION=${{ secrets.AWS_REGION }}" \
+            "${FULL_IMAGE_NAME}"
+          
+          # Verify container is running
+          sleep 3
+          if docker ps | grep -q projet_prevision; then
+            echo "Container started successfully"
+            docker logs projet_prevision --tail 20
+          else
+            echo "Failed to start container"
+            docker logs projet_prevision
+            exit 1
+          fi
+          
       - name: Clean previous images and containers
         run: |
-         docker system prune -f
+          echo "Cleaning up unused Docker resources..."
+          docker system prune -f
