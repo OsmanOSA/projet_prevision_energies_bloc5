@@ -117,77 +117,59 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
       
-      - name: Clean up Docker space before deployment
+      - name: Quick cleanup before deployment
+        timeout-minutes: 2
         run: |
-          echo "=== Cleaning up Docker space before deployment ==="
-          echo "Disk usage before cleanup:"
-          df -h /
-          df -h /var/lib/docker || true
+          echo "=== Quick cleanup before deployment ==="
+          START_TIME=$(date +%s)
           
-          # Stop and remove the existing container if it exists
-          if docker ps -a --format '{{.Names}}' | grep -q '^projet_prevision$'; then
-            echo "Stopping and removing existing container..."
-            docker stop projet_prevision || true
+          # Quick disk check
+          echo "Disk usage:"
+          df -h / | head -2
+          
+          # Stop existing container if running (should be fast)
+          if docker ps --format '{{.Names}}' | grep -q '^projet_prevision$'; then
+            echo "Stopping existing container..."
+            docker stop projet_prevision --time 10 || true
             docker rm -v projet_prevision || true
           fi
           
-          # Remove all stopped containers with their volumes
-          echo "Removing stopped containers..."
-          docker container prune -f || true
+          # Only check if we really need to clean (less than 3GB free)
+          AVAILABLE_GB=$(df / | awk 'NR==2 {print int($4/1024/1024)}')
+          echo "Available space: ${AVAILABLE_GB}GB"
           
-          # Remove unused images (keeping only the last few)
-          echo "Removing unused images..."
-          docker image prune -a -f --filter "until=24h" || true
-          
-          # Remove ALL dangling images
-          echo "Removing dangling images..."
-          docker rmi $(docker images -f "dangling=true" -q) 2>/dev/null || true
-          
-          # Remove unused volumes
-          echo "Removing unused volumes..."
-          docker volume prune -f || true
-          
-          # Remove unused networks
-          echo "Removing unused networks..."
-          docker network prune -f || true
-          
-          # Remove build cache
-          echo "Removing build cache..."
-          docker builder prune -a -f || true
-          
-          # Aggressive cleanup if still low on space (less than 5GB free)
-          AVAILABLE_SPACE=$(df / | awk 'NR==2 {print $4}')
-          if [ "$AVAILABLE_SPACE" -lt 5000000 ]; then
-            echo "WARNING: Less than 5GB available, performing aggressive cleanup..."
-            # Remove ALL images except the base Python image
-            docker images | grep -v "python" | grep -v "REPOSITORY" | awk '{print $3}' | xargs -r docker rmi -f 2>/dev/null || true
-            # Full system prune
-            docker system prune -a -f --volumes || true
+          if [ "$AVAILABLE_GB" -lt 3 ]; then
+            echo "Low disk space detected, performing cleanup..."
+            
+            # Quick prune of stopped containers and dangling images only
+            docker container prune -f || true
+            docker image prune -f || true
+            
+            # If still low, remove old images from the same repo
+            if [ "$AVAILABLE_GB" -lt 2 ]; then
+              echo "Very low space, removing old application images..."
+              docker images | grep "${{ secrets.ECR_REPOSITORY_NAME }}" | awk '{if(NR>1)print $3}' | xargs -r docker rmi -f 2>/dev/null || true
+            fi
+          else
+            echo "Sufficient disk space available, skipping cleanup"
           fi
           
-          # Show disk usage after cleanup
-          echo "Disk usage after cleanup:"
-          df -h /
-          df -h /var/lib/docker || true
-          
-          # Check Docker disk usage
-          echo "Docker disk usage:"
-          docker system df
+          END_TIME=$(date +%s)
+          echo "Cleanup completed in $((END_TIME - START_TIME)) seconds"
       
-      - name: Pull latest images
+      - name: Pull latest image from ECR
+        timeout-minutes: 5
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY_NAME }}
           IMAGE_TAG: latest
         run: |
+          START_TIME=$(date +%s)
+          
           # Trim whitespace from variables
           ECR_REGISTRY=$(echo "$ECR_REGISTRY" | xargs)
           ECR_REPOSITORY=$(echo "$ECR_REPOSITORY" | xargs)
           IMAGE_TAG=$(echo "$IMAGE_TAG" | xargs)
-          
-          echo "Pulling Docker image..."
-          echo "ECR_REGISTRY: '$ECR_REGISTRY'"
-          echo "ECR_REPOSITORY: '$ECR_REPOSITORY'"
           
           # Verify that environment variables are set
           if [ -z "$ECR_REGISTRY" ] || [ -z "$ECR_REPOSITORY" ]; then
@@ -197,17 +179,30 @@ jobs:
           
           # Construct the full image name
           FULL_IMAGE_NAME="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
-          echo "Full image name: '$FULL_IMAGE_NAME'"
+          echo "Pulling image: $FULL_IMAGE_NAME"
           
-          # Pull the image
-          docker pull "${FULL_IMAGE_NAME}"
+          # Check if image already exists locally
+          if docker image inspect "${FULL_IMAGE_NAME}" >/dev/null 2>&1; then
+            echo "Image exists locally, checking for updates..."
+            # Try to pull, but don't fail if unchanged
+            docker pull "${FULL_IMAGE_NAME}" || echo "Image is up-to-date"
+          else
+            echo "Image not found locally, pulling from ECR..."
+            docker pull "${FULL_IMAGE_NAME}"
+          fi
+          
+          END_TIME=$(date +%s)
+          echo "Pull completed in $((END_TIME - START_TIME)) seconds"
        
       - name: Run Docker Image to serve users
+        timeout-minutes: 2
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY_NAME }}
           IMAGE_TAG: latest
         run: |
+          START_TIME=$(date +%s)
+          
           # Trim whitespace from variables
           ECR_REGISTRY=$(echo "$ECR_REGISTRY" | xargs)
           ECR_REPOSITORY=$(echo "$ECR_REPOSITORY" | xargs)
@@ -216,12 +211,11 @@ jobs:
           # Construct the full image name
           FULL_IMAGE_NAME="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
           
-          echo "Starting container with image: '$FULL_IMAGE_NAME'"
+          echo "Starting container..."
           
           # Run the container
           docker run -d \
             -p 8080:8080 \
-            --ipc="host" \
             --name=projet_prevision \
             --restart unless-stopped \
             -e "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" \
@@ -229,34 +223,36 @@ jobs:
             -e "AWS_REGION=${{ secrets.AWS_REGION }}" \
             "${FULL_IMAGE_NAME}"
           
-          # Verify container is running
-          sleep 3
+          # Quick health check
+          sleep 2
           if docker ps | grep -q projet_prevision; then
             echo "Container started successfully"
-            docker logs projet_prevision --tail 20
+            docker logs projet_prevision --tail 10
           else
             echo "Failed to start container"
             docker logs projet_prevision
             exit 1
           fi
           
-      - name: Clean previous images and containers
+          END_TIME=$(date +%s)
+          echo "Container started in $((END_TIME - START_TIME)) seconds"
+          
+      - name: Optional post-deployment cleanup
+        timeout-minutes: 1
+        continue-on-error: true
         run: |
-          echo "=== Post-deployment cleanup ==="
+          echo "=== Quick post-deployment cleanup ==="
           
-          # Keep only the currently running image and remove old ones
-          CURRENT_IMAGE=$(docker ps --filter "name=projet_prevision" --format "{{.Image}}")
-          echo "Current running image: $CURRENT_IMAGE"
+          # Only clean if really needed (less than 2GB free)
+          AVAILABLE_GB=$(df / | awk 'NR==2 {print int($4/1024/1024)}')
           
-          # Remove old images from the same repository (keep only the latest)
-          echo "Removing old versions of the application image..."
-          docker images | grep "${{ secrets.ECR_REPOSITORY_NAME }}" | grep -v "$CURRENT_IMAGE" | awk '{print $3}' | xargs -r docker rmi -f 2>/dev/null || true
+          if [ "$AVAILABLE_GB" -lt 2 ]; then
+            echo "Low space (${AVAILABLE_GB}GB), cleaning old images..."
+            # Quick cleanup of dangling resources only
+            docker image prune -f || true
+            docker container prune -f || true
+          else
+            echo "Sufficient space (${AVAILABLE_GB}GB), skipping cleanup"
+          fi
           
-          # General cleanup
-          echo "Cleaning up unused Docker resources..."
-          docker system prune -f --volumes
-          
-          # Final disk usage report
-          echo "Final disk usage:"
-          df -h /
-          docker system df
+          echo "Deployment completed! Disk usage: $(df -h / | awk 'NR==2 {print $4}') free"
