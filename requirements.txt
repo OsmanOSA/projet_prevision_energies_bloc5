@@ -20,6 +20,5 @@ dagshub
 fastapi
 uvicorn
 python-multipart
-pycaret
 
 ##-e .
