@@ -9755,3 +9755,351 @@ Styler.applymap has been deprecated. Use Styler.map instead.
                     regressor=KNeighborsRegressor(n_jobs=-1), sp=24,
                     window_length=24)
 2025-09-17 22:45:58,876:INFO:compare_models() successfully completed......................................
+2025-09-17 22:48:30,612:INFO:Initializing tune_model()
+2025-09-17 22:48:30,612:INFO:tune_model(self=<pycaret.time_series.forecasting.oop.TSForecastingExperiment object at 0x0000028CF6FEB9A0>, estimator=BaseCdsDtForecaster(fe_target_rr=[WindowSummarizer(lag_feature={'lag': [24, 23,
+                                                                        22, 21,
+                                                                        20, 19,
+                                                                        18, 17,
+                                                                        16, 15,
+                                                                        14, 13,
+                                                                        12, 11,
+                                                                        10, 9,
+                                                                        8, 7, 6,
+                                                                        5, 4, 3,
+                                                                        2, 1]},
+                                                   n_jobs=1)],
+                    regressor=KNeighborsRegressor(n_jobs=-1), sp=24,
+                    window_length=24), fold=None, round=4, n_iter=10, custom_grid=None, optimize=MASE, custom_scorer=None, search_algorithm=None, choose_better=True, fit_kwargs=None, return_tuner=False, verbose=True, tuner_verbose=True, kwargs={}, search_library=pycaret, _allowed_search_algorithms=[None, 'random', 'grid'])
+2025-09-17 22:48:30,612:INFO:Checking exceptions
+2025-09-17 22:48:30,631:INFO:Copying training dataset
+2025-09-17 22:48:30,648:INFO:Checking base model
+2025-09-17 22:48:30,648:INFO:Base model : K Neighbors w/ Cond. Deseasonalize & Detrending
+2025-09-17 22:48:30,655:INFO:Declaring metric variables
+2025-09-17 22:48:30,657:INFO:Defining Hyperparameters
+2025-09-17 22:48:31,984:INFO:Tuning with n_jobs=-1
+2025-09-17 22:48:31,989:INFO:Initializing ForecastingRandomizedGridSearchCV
+2025-09-17 22:48:42,433:INFO:best_params: {'forecaster__model__degree': 1, 'forecaster__model__deseasonal_model': 'additive', 'forecaster__model__regressor__metric': 'minkowski', 'forecaster__model__regressor__n_neighbors': 5, 'forecaster__model__regressor__weights': 'distance', 'forecaster__model__sp': 24, 'forecaster__model__window_length': 10}
+2025-09-17 22:48:42,434:INFO:Hyperparameter search completed
+2025-09-17 22:48:42,434:INFO:SubProcess create_model() called ==================================
+2025-09-17 22:48:42,438:INFO:Initializing create_model()
+2025-09-17 22:48:42,438:INFO:create_model(self=<pycaret.time_series.forecasting.oop.TSForecastingExperiment object at 0x0000028CF6FEB9A0>, estimator=BaseCdsDtForecaster(fe_target_rr=[WindowSummarizer(lag_feature={'lag': [24, 23,
+                                                                        22, 21,
+                                                                        20, 19,
+                                                                        18, 17,
+                                                                        16, 15,
+                                                                        14, 13,
+                                                                        12, 11,
+                                                                        10, 9,
+                                                                        8, 7, 6,
+                                                                        5, 4, 3,
+                                                                        2, 1]},
+                                                   n_jobs=1)],
+                    regressor=KNeighborsRegressor(n_jobs=-1), sp=24,
+                    window_length=24), fold=None, round=4, cross_validation=True, predict=True, fit_kwargs={'fh': ForecastingHorizon([ 1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+       19, 20, 21, 22, 23, 24],
+      dtype='int32', is_relative=True)}, groups=None, refit=True, probability_threshold=None, experiment_custom_tags=None, verbose=True, system=False, add_to_model_list=True, metrics=None, display=<pycaret.internal.display.display.CommonDisplay object at 0x0000028CF4DD21A0>, model_only=True, return_train_score=False, error_score=0.0, kwargs={'degree': 1, 'deseasonal_model': 'additive', 'regressor__metric': 'minkowski', 'regressor__n_neighbors': 5, 'regressor__weights': 'distance', 'sp': 24, 'window_length': 10})
+2025-09-17 22:48:42,438:INFO:Checking exceptions
+2025-09-17 22:48:42,438:INFO:Importing libraries
+2025-09-17 22:48:42,439:INFO:Copying training dataset
+2025-09-17 22:48:42,451:INFO:Defining folds
+2025-09-17 22:48:42,451:INFO:Declaring metric variables
+2025-09-17 22:48:42,455:INFO:Importing untrained model
+2025-09-17 22:48:42,455:INFO:Declaring custom model
+2025-09-17 22:48:42,461:INFO:KNeighborsRegressor Imported successfully
+2025-09-17 22:48:42,472:INFO:Starting cross validation
+2025-09-17 22:48:42,474:INFO:Cross validating with ExpandingWindowSplitter(fh=ForecastingHorizon([ 1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+       19, 20, 21, 22, 23, 24],
+      dtype='int32', is_relative=True),
+                        initial_window=66455, step_length=24), n_jobs=-1
+2025-09-17 22:48:44,259:WARNING:c:\Users\saida\anaconda3\envs\venv-stat\lib\site-packages\sklearn\metrics\_regression.py:483: FutureWarning: 'squared' is deprecated in version 1.4 and will be removed in 1.6. To calculate the root mean squared error, use the function'root_mean_squared_error'.
+  warnings.warn(
+
+2025-09-17 22:48:44,261:WARNING:c:\Users\saida\anaconda3\envs\venv-stat\lib\site-packages\sklearn\metrics\_regression.py:483: FutureWarning: 'squared' is deprecated in version 1.4 and will be removed in 1.6. To calculate the root mean squared error, use the function'root_mean_squared_error'.
+  warnings.warn(
+
+2025-09-17 22:48:44,269:WARNING:c:\Users\saida\anaconda3\envs\venv-stat\lib\site-packages\sklearn\metrics\_regression.py:483: FutureWarning: 'squared' is deprecated in version 1.4 and will be removed in 1.6. To calculate the root mean squared error, use the function'root_mean_squared_error'.
+  warnings.warn(
+
+2025-09-17 22:48:44,269:WARNING:c:\Users\saida\anaconda3\envs\venv-stat\lib\site-packages\sklearn\metrics\_regression.py:483: FutureWarning: 'squared' is deprecated in version 1.4 and will be removed in 1.6. To calculate the root mean squared error, use the function'root_mean_squared_error'.
+  warnings.warn(
+
+2025-09-17 22:48:44,297:WARNING:c:\Users\saida\anaconda3\envs\venv-stat\lib\site-packages\sklearn\metrics\_regression.py:483: FutureWarning: 'squared' is deprecated in version 1.4 and will be removed in 1.6. To calculate the root mean squared error, use the function'root_mean_squared_error'.
+  warnings.warn(
+
+2025-09-17 22:48:44,297:WARNING:c:\Users\saida\anaconda3\envs\venv-stat\lib\site-packages\sklearn\metrics\_regression.py:483: FutureWarning: 'squared' is deprecated in version 1.4 and will be removed in 1.6. To calculate the root mean squared error, use the function'root_mean_squared_error'.
+  warnings.warn(
+
+2025-09-17 22:48:44,312:INFO:Calculating mean and std
+2025-09-17 22:48:44,312:INFO:Creating metrics dataframe
+2025-09-17 22:48:44,315:WARNING:c:\Users\saida\anaconda3\envs\venv-stat\lib\site-packages\pycaret\time_series\forecasting\oop.py:2694: FutureWarning:
+
+The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. To retain the old behavior, exclude the relevant entries before the concat operation.
+
+
+2025-09-17 22:48:44,318:INFO:Finalizing model
+2025-09-17 22:48:52,611:INFO:Uploading results into container
+2025-09-17 22:48:52,611:INFO:Uploading model into container now
+2025-09-17 22:48:52,612:INFO:_master_model_container: 32
+2025-09-17 22:48:52,612:INFO:_display_container: 4
+2025-09-17 22:48:52,614:INFO:BaseCdsDtForecaster(fe_target_rr=[WindowSummarizer(lag_feature={'lag': [24, 23,
+                                                                        22, 21,
+                                                                        20, 19,
+                                                                        18, 17,
+                                                                        16, 15,
+                                                                        14, 13,
+                                                                        12, 11,
+                                                                        10, 9,
+                                                                        8, 7, 6,
+                                                                        5, 4, 3,
+                                                                        2, 1]},
+                                                   n_jobs=1)],
+                    regressor=KNeighborsRegressor(n_jobs=-1, weights='distance'),
+                    sp=24)
+2025-09-17 22:48:52,615:INFO:create_model() successfully completed......................................
+2025-09-17 22:48:53,863:INFO:SubProcess create_model() end ==================================
+2025-09-17 22:48:53,863:INFO:choose_better activated
+2025-09-17 22:48:53,868:INFO:SubProcess create_model() called ==================================
+2025-09-17 22:48:53,871:INFO:Initializing create_model()
+2025-09-17 22:48:53,871:INFO:create_model(self=<pycaret.time_series.forecasting.oop.TSForecastingExperiment object at 0x0000028CF6FEB9A0>, estimator=BaseCdsDtForecaster(fe_target_rr=[WindowSummarizer(lag_feature={'lag': [24, 23,
+                                                                        22, 21,
+                                                                        20, 19,
+                                                                        18, 17,
+                                                                        16, 15,
+                                                                        14, 13,
+                                                                        12, 11,
+                                                                        10, 9,
+                                                                        8, 7, 6,
+                                                                        5, 4, 3,
+                                                                        2, 1]},
+                                                   n_jobs=1)],
+                    regressor=KNeighborsRegressor(n_jobs=-1), sp=24,
+                    window_length=24), fold=None, round=4, cross_validation=True, predict=True, fit_kwargs={'fh': ForecastingHorizon([ 1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+       19, 20, 21, 22, 23, 24],
+      dtype='int32', is_relative=True)}, groups=None, refit=True, probability_threshold=None, experiment_custom_tags=None, verbose=False, system=False, add_to_model_list=True, metrics=None, display=None, model_only=True, return_train_score=False, error_score=0.0, kwargs={})
+2025-09-17 22:48:53,871:INFO:Checking exceptions
+2025-09-17 22:48:53,873:INFO:Importing libraries
+2025-09-17 22:48:53,873:INFO:Copying training dataset
+2025-09-17 22:48:53,884:INFO:Defining folds
+2025-09-17 22:48:53,884:INFO:Declaring metric variables
+2025-09-17 22:48:53,884:INFO:Importing untrained model
+2025-09-17 22:48:53,884:INFO:Declaring custom model
+2025-09-17 22:48:53,885:INFO:KNeighborsRegressor Imported successfully
+2025-09-17 22:48:53,887:INFO:Starting cross validation
+2025-09-17 22:48:53,888:INFO:Cross validating with ExpandingWindowSplitter(fh=ForecastingHorizon([ 1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+       19, 20, 21, 22, 23, 24],
+      dtype='int32', is_relative=True),
+                        initial_window=66455, step_length=24), n_jobs=-1
+2025-09-17 22:48:55,717:WARNING:c:\Users\saida\anaconda3\envs\venv-stat\lib\site-packages\sklearn\metrics\_regression.py:483: FutureWarning: 'squared' is deprecated in version 1.4 and will be removed in 1.6. To calculate the root mean squared error, use the function'root_mean_squared_error'.
+  warnings.warn(
+
+2025-09-17 22:48:55,718:WARNING:c:\Users\saida\anaconda3\envs\venv-stat\lib\site-packages\sklearn\metrics\_regression.py:483: FutureWarning: 'squared' is deprecated in version 1.4 and will be removed in 1.6. To calculate the root mean squared error, use the function'root_mean_squared_error'.
+  warnings.warn(
+
+2025-09-17 22:48:55,721:WARNING:c:\Users\saida\anaconda3\envs\venv-stat\lib\site-packages\sklearn\metrics\_regression.py:483: FutureWarning: 'squared' is deprecated in version 1.4 and will be removed in 1.6. To calculate the root mean squared error, use the function'root_mean_squared_error'.
+  warnings.warn(
+
+2025-09-17 22:48:55,721:WARNING:c:\Users\saida\anaconda3\envs\venv-stat\lib\site-packages\sklearn\metrics\_regression.py:483: FutureWarning: 'squared' is deprecated in version 1.4 and will be removed in 1.6. To calculate the root mean squared error, use the function'root_mean_squared_error'.
+  warnings.warn(
+
+2025-09-17 22:48:55,778:WARNING:c:\Users\saida\anaconda3\envs\venv-stat\lib\site-packages\sklearn\metrics\_regression.py:483: FutureWarning: 'squared' is deprecated in version 1.4 and will be removed in 1.6. To calculate the root mean squared error, use the function'root_mean_squared_error'.
+  warnings.warn(
+
+2025-09-17 22:48:55,778:WARNING:c:\Users\saida\anaconda3\envs\venv-stat\lib\site-packages\sklearn\metrics\_regression.py:483: FutureWarning: 'squared' is deprecated in version 1.4 and will be removed in 1.6. To calculate the root mean squared error, use the function'root_mean_squared_error'.
+  warnings.warn(
+
+2025-09-17 22:48:55,799:INFO:Calculating mean and std
+2025-09-17 22:48:55,800:INFO:Creating metrics dataframe
+2025-09-17 22:48:55,802:WARNING:c:\Users\saida\anaconda3\envs\venv-stat\lib\site-packages\pycaret\time_series\forecasting\oop.py:2694: FutureWarning:
+
+The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. To retain the old behavior, exclude the relevant entries before the concat operation.
+
+
+2025-09-17 22:48:55,802:INFO:Finalizing model
+2025-09-17 22:49:04,180:INFO:Uploading results into container
+2025-09-17 22:49:04,180:INFO:Uploading model into container now
+2025-09-17 22:49:04,180:INFO:_master_model_container: 33
+2025-09-17 22:49:04,180:INFO:_display_container: 5
+2025-09-17 22:49:04,183:INFO:BaseCdsDtForecaster(fe_target_rr=[WindowSummarizer(lag_feature={'lag': [24, 23,
+                                                                        22, 21,
+                                                                        20, 19,
+                                                                        18, 17,
+                                                                        16, 15,
+                                                                        14, 13,
+                                                                        12, 11,
+                                                                        10, 9,
+                                                                        8, 7, 6,
+                                                                        5, 4, 3,
+                                                                        2, 1]},
+                                                   n_jobs=1)],
+                    regressor=KNeighborsRegressor(n_jobs=-1), sp=24,
+                    window_length=24)
+2025-09-17 22:49:04,183:INFO:create_model() successfully completed......................................
+2025-09-17 22:49:05,395:INFO:SubProcess create_model() end ==================================
+2025-09-17 22:49:05,398:INFO:BaseCdsDtForecaster(fe_target_rr=[WindowSummarizer(lag_feature={'lag': [24, 23,
+                                                                        22, 21,
+                                                                        20, 19,
+                                                                        18, 17,
+                                                                        16, 15,
+                                                                        14, 13,
+                                                                        12, 11,
+                                                                        10, 9,
+                                                                        8, 7, 6,
+                                                                        5, 4, 3,
+                                                                        2, 1]},
+                                                   n_jobs=1)],
+                    regressor=KNeighborsRegressor(n_jobs=-1), sp=24,
+                    window_length=24) result for MASE is 1.3272
+2025-09-17 22:49:05,398:INFO:SubProcess create_model() called ==================================
+2025-09-17 22:49:05,401:INFO:Initializing create_model()
+2025-09-17 22:49:05,401:INFO:create_model(self=<pycaret.time_series.forecasting.oop.TSForecastingExperiment object at 0x0000028CF6FEB9A0>, estimator=BaseCdsDtForecaster(fe_target_rr=[WindowSummarizer(lag_feature={'lag': [24, 23,
+                                                                        22, 21,
+                                                                        20, 19,
+                                                                        18, 17,
+                                                                        16, 15,
+                                                                        14, 13,
+                                                                        12, 11,
+                                                                        10, 9,
+                                                                        8, 7, 6,
+                                                                        5, 4, 3,
+                                                                        2, 1]},
+                                                   n_jobs=1)],
+                    regressor=KNeighborsRegressor(n_jobs=-1, weights='distance'),
+                    sp=24), fold=None, round=4, cross_validation=True, predict=True, fit_kwargs={'fh': ForecastingHorizon([ 1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+       19, 20, 21, 22, 23, 24],
+      dtype='int32', is_relative=True)}, groups=None, refit=True, probability_threshold=None, experiment_custom_tags=None, verbose=False, system=False, add_to_model_list=True, metrics=None, display=None, model_only=True, return_train_score=False, error_score=0.0, kwargs={})
+2025-09-17 22:49:05,401:INFO:Checking exceptions
+2025-09-17 22:49:05,403:INFO:Importing libraries
+2025-09-17 22:49:05,403:INFO:Copying training dataset
+2025-09-17 22:49:05,410:INFO:Defining folds
+2025-09-17 22:49:05,410:INFO:Declaring metric variables
+2025-09-17 22:49:05,410:INFO:Importing untrained model
+2025-09-17 22:49:05,411:INFO:Declaring custom model
+2025-09-17 22:49:05,412:INFO:KNeighborsRegressor Imported successfully
+2025-09-17 22:49:05,414:INFO:Starting cross validation
+2025-09-17 22:49:05,416:INFO:Cross validating with ExpandingWindowSplitter(fh=ForecastingHorizon([ 1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+       19, 20, 21, 22, 23, 24],
+      dtype='int32', is_relative=True),
+                        initial_window=66455, step_length=24), n_jobs=-1
+2025-09-17 22:49:07,324:WARNING:c:\Users\saida\anaconda3\envs\venv-stat\lib\site-packages\sklearn\metrics\_regression.py:483: FutureWarning: 'squared' is deprecated in version 1.4 and will be removed in 1.6. To calculate the root mean squared error, use the function'root_mean_squared_error'.
+  warnings.warn(
+
+2025-09-17 22:49:07,326:WARNING:c:\Users\saida\anaconda3\envs\venv-stat\lib\site-packages\sklearn\metrics\_regression.py:483: FutureWarning: 'squared' is deprecated in version 1.4 and will be removed in 1.6. To calculate the root mean squared error, use the function'root_mean_squared_error'.
+  warnings.warn(
+
+2025-09-17 22:49:07,343:WARNING:c:\Users\saida\anaconda3\envs\venv-stat\lib\site-packages\sklearn\metrics\_regression.py:483: FutureWarning: 'squared' is deprecated in version 1.4 and will be removed in 1.6. To calculate the root mean squared error, use the function'root_mean_squared_error'.
+  warnings.warn(
+
+2025-09-17 22:49:07,343:WARNING:c:\Users\saida\anaconda3\envs\venv-stat\lib\site-packages\sklearn\metrics\_regression.py:483: FutureWarning: 'squared' is deprecated in version 1.4 and will be removed in 1.6. To calculate the root mean squared error, use the function'root_mean_squared_error'.
+  warnings.warn(
+
+2025-09-17 22:49:07,383:WARNING:c:\Users\saida\anaconda3\envs\venv-stat\lib\site-packages\sklearn\metrics\_regression.py:483: FutureWarning: 'squared' is deprecated in version 1.4 and will be removed in 1.6. To calculate the root mean squared error, use the function'root_mean_squared_error'.
+  warnings.warn(
+
+2025-09-17 22:49:07,384:WARNING:c:\Users\saida\anaconda3\envs\venv-stat\lib\site-packages\sklearn\metrics\_regression.py:483: FutureWarning: 'squared' is deprecated in version 1.4 and will be removed in 1.6. To calculate the root mean squared error, use the function'root_mean_squared_error'.
+  warnings.warn(
+
+2025-09-17 22:49:07,404:INFO:Calculating mean and std
+2025-09-17 22:49:07,404:INFO:Creating metrics dataframe
+2025-09-17 22:49:07,405:WARNING:c:\Users\saida\anaconda3\envs\venv-stat\lib\site-packages\pycaret\time_series\forecasting\oop.py:2694: FutureWarning:
+
+The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. To retain the old behavior, exclude the relevant entries before the concat operation.
+
+
+2025-09-17 22:49:07,406:INFO:Finalizing model
+2025-09-17 22:49:15,462:INFO:Uploading results into container
+2025-09-17 22:49:15,462:INFO:Uploading model into container now
+2025-09-17 22:49:15,463:INFO:_master_model_container: 34
+2025-09-17 22:49:15,463:INFO:_display_container: 5
+2025-09-17 22:49:15,465:INFO:BaseCdsDtForecaster(fe_target_rr=[WindowSummarizer(lag_feature={'lag': [24, 23,
+                                                                        22, 21,
+                                                                        20, 19,
+                                                                        18, 17,
+                                                                        16, 15,
+                                                                        14, 13,
+                                                                        12, 11,
+                                                                        10, 9,
+                                                                        8, 7, 6,
+                                                                        5, 4, 3,
+                                                                        2, 1]},
+                                                   n_jobs=1)],
+                    regressor=KNeighborsRegressor(n_jobs=-1, weights='distance'),
+                    sp=24)
+2025-09-17 22:49:15,465:INFO:create_model() successfully completed......................................
+2025-09-17 22:49:16,662:INFO:SubProcess create_model() end ==================================
+2025-09-17 22:49:16,665:INFO:BaseCdsDtForecaster(fe_target_rr=[WindowSummarizer(lag_feature={'lag': [24, 23,
+                                                                        22, 21,
+                                                                        20, 19,
+                                                                        18, 17,
+                                                                        16, 15,
+                                                                        14, 13,
+                                                                        12, 11,
+                                                                        10, 9,
+                                                                        8, 7, 6,
+                                                                        5, 4, 3,
+                                                                        2, 1]},
+                                                   n_jobs=1)],
+                    regressor=KNeighborsRegressor(n_jobs=-1, weights='distance'),
+                    sp=24) result for MASE is 1.262
+2025-09-17 22:49:16,668:INFO:BaseCdsDtForecaster(fe_target_rr=[WindowSummarizer(lag_feature={'lag': [24, 23,
+                                                                        22, 21,
+                                                                        20, 19,
+                                                                        18, 17,
+                                                                        16, 15,
+                                                                        14, 13,
+                                                                        12, 11,
+                                                                        10, 9,
+                                                                        8, 7, 6,
+                                                                        5, 4, 3,
+                                                                        2, 1]},
+                                                   n_jobs=1)],
+                    regressor=KNeighborsRegressor(n_jobs=-1, weights='distance'),
+                    sp=24) is best model
+2025-09-17 22:49:16,668:INFO:choose_better completed
+2025-09-17 22:49:16,683:INFO:_master_model_container: 34
+2025-09-17 22:49:16,683:INFO:_display_container: 4
+2025-09-17 22:49:16,687:INFO:BaseCdsDtForecaster(fe_target_rr=[WindowSummarizer(lag_feature={'lag': [24, 23,
+                                                                        22, 21,
+                                                                        20, 19,
+                                                                        18, 17,
+                                                                        16, 15,
+                                                                        14, 13,
+                                                                        12, 11,
+                                                                        10, 9,
+                                                                        8, 7, 6,
+                                                                        5, 4, 3,
+                                                                        2, 1]},
+                                                   n_jobs=1)],
+                    regressor=KNeighborsRegressor(n_jobs=-1, weights='distance'),
+                    sp=24)
+2025-09-17 22:49:16,687:INFO:tune_model() successfully completed......................................
+2025-09-17 22:49:49,464:WARNING:c:\Users\saida\anaconda3\envs\venv-stat\lib\site-packages\sklearn\metrics\_regression.py:483: FutureWarning:
+
+'squared' is deprecated in version 1.4 and will be removed in 1.6. To calculate the root mean squared error, use the function'root_mean_squared_error'.
+
+
+2025-09-17 22:49:49,465:WARNING:c:\Users\saida\anaconda3\envs\venv-stat\lib\site-packages\sklearn\metrics\_regression.py:483: FutureWarning:
+
+'squared' is deprecated in version 1.4 and will be removed in 1.6. To calculate the root mean squared error, use the function'root_mean_squared_error'.
+
+
+2025-09-17 22:49:49,466:WARNING:c:\Users\saida\anaconda3\envs\venv-stat\lib\site-packages\sklearn\metrics\_regression.py:483: FutureWarning:
+
+'squared' is deprecated in version 1.4 and will be removed in 1.6. To calculate the root mean squared error, use the function'root_mean_squared_error'.
+
+
+2025-09-17 22:50:07,662:WARNING:c:\Users\saida\anaconda3\envs\venv-stat\lib\site-packages\sklearn\metrics\_regression.py:483: FutureWarning:
+
+'squared' is deprecated in version 1.4 and will be removed in 1.6. To calculate the root mean squared error, use the function'root_mean_squared_error'.
+
+
+2025-09-17 22:50:07,663:WARNING:c:\Users\saida\anaconda3\envs\venv-stat\lib\site-packages\sklearn\metrics\_regression.py:483: FutureWarning:
+
+'squared' is deprecated in version 1.4 and will be removed in 1.6. To calculate the root mean squared error, use the function'root_mean_squared_error'.
+
+
+2025-09-17 22:50:07,663:WARNING:c:\Users\saida\anaconda3\envs\venv-stat\lib\site-packages\sklearn\metrics\_regression.py:483: FutureWarning:
+
+'squared' is deprecated in version 1.4 and will be removed in 1.6. To calculate the root mean squared error, use the function'root_mean_squared_error'.
+
+
+2025-09-17 22:50:09,075:INFO:Visual Rendered Successfully
