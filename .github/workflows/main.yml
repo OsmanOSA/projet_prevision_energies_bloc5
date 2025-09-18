@@ -21,7 +21,7 @@ jobs:
       - name: Run unit tests
         run: echo "Running unit tests"
 
-  build-and-push-heroku-image:
+  build-and-deploy:
     name: Continuous Delivery and Deployment
     needs: integration
     runs-on: ubuntu-latest
@@ -29,18 +29,11 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      - name: Install Utilities
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y jq unzip
-
-      - name: Build, Push and Release a Docker container to Heroku
-        uses: gonuit/heroku-docker-deploy@v1.3.3
+      # Déploiement sur Heroku avec Docker
+      - name: Deploy to Heroku
+        uses: akhileshns/[email protected]
         with:
-          email: ${{ secrets.HEROKU_EMAIL }}
           heroku_api_key: ${{ secrets.HEROKU_API_KEY }}
           heroku_app_name: ${{ secrets.HEROKU_APP_NAME }}
-          dockerfile_directory: ./
-          dockerfile_name: Dockerfile
-          docker_options: "--no-cache"
-          process_type: web
+          heroku_email: ${{ secrets.HEROKU_EMAIL }}
+          usedocker: true
