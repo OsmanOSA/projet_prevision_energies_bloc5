@@ -2,7 +2,6 @@ import sys
 import os
 import pandas as pd
 import numpy as np
-import psutil
 
 from io import BytesIO
 from fastapi import FastAPI, File, UploadFile, Request
