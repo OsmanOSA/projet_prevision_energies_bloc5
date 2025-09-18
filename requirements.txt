@@ -4,15 +4,8 @@ numpy
 matplotlib
 plotly
 scikit-learn
-tsfresh
-tensorflow
-keras
 xgboost
-statsforecast 
-utilsforecast
-feature-engine
 meteostat
-holidays
 dill
 pyaml
 mlflow==2.12.1
