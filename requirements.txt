@@ -15,7 +15,7 @@ meteostat
 holidays
 dill
 pyaml
-mlflow
+mlflow==2.12.1
 dagshub
 fastapi
 uvicorn
