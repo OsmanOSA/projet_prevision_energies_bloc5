@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Lint code
         run: echo "Linting repository"
@@ -27,17 +27,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
+
       # Déploiement sur Heroku avec Docker
       - name: Deploy to Heroku
-        uses: gonuit/heroku-docker-deploy@v1.3.3
+        uses: akhileshns/heroku-deploy@v3.13.15
         with:
           heroku_api_key: ${{ secrets.HEROKU_API_KEY }}
           heroku_app_name: ${{ secrets.HEROKU_APP_NAME }}
-          email: ${{ secrets.HEROKU_EMAIL }}
+          heroku_email: ${{ secrets.HEROKU_EMAIL }}
           dockerfile_directory: ./
           dockerfile_name: Dockerfile
           docker_options: "--no-cache"
+
           # (Optional, default: "web")
           process_type: web
         
