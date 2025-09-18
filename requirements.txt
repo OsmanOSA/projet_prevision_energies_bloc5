@@ -13,5 +13,7 @@ dagshub
 fastapi
 uvicorn
 python-multipart
+streamlit
+requests
 
 ##-e .
