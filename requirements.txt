@@ -12,9 +12,10 @@ pyaml
 mlflow==2.12.1
 dagshub
 fastapi
-uvicorn
+uvicorn[standard]
 python-multipart
 streamlit
 requests
+psutil
 
 ##-e .
