@@ -3,15 +3,20 @@ FROM python:3.10-slim
 # Définir répertoire de travail
 WORKDIR /app
 
-# Copier les fichiers
+# Installer les dépendances système pour LightGBM
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copier les fichiers de l'application
 COPY . /app
 
-# Installer dépendances
+# Installer dépendances Python
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Exposer le port (Heroku utilise PORT automatiquement, mais on met 8000 par défaut)
+# Exposer le port (Heroku utilise $PORT automatiquement)
 EXPOSE 8000
 
 # Lancer FastAPI avec Uvicorn (Heroku définit $PORT)
 CMD ["python", "app.py"]
-
