@@ -1,11 +1,16 @@
 FROM python:3.10-slim
 
-COPY ./app
-
+# Définir répertoire de travail
 WORKDIR /app
 
-RUN pip install -r requirements.txt
+# Copier les fichiers
+COPY . /app
 
-EXPOSE $PORT
+# Installer dépendances
+RUN pip install --no-cache-dir -r requirements.txt
 
-CMD ["python", "app.py"]
+# Exposer le port (Heroku utilise PORT automatiquement, mais on met 8000 par défaut)
+EXPOSE 8000
+
+# Lancer FastAPI avec Uvicorn (Heroku définit $PORT)
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
