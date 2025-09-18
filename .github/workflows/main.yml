@@ -35,7 +35,7 @@ jobs:
           sudo apt-get install -y jq unzip
 
       - name: Build, Push and Release a Docker container to Heroku
-        uses: gonuit/heroku-docker-deploy@v2
+        uses: gonuit/heroku-docker-deploy@v2.0.0
         with:
           email: ${{ secrets.HEROKU_EMAIL }}
           heroku_api_key: ${{ secrets.HEROKU_API_KEY }}
