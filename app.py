@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from pipeline_prevision.exception.exception import ForecastingException
-#from pipeline_prevision.pipeline.training_pipeline import TrainingPipeline
+from pipeline_prevision.pipeline.training_pipeline import TrainingPipeline
 from pipeline_prevision.utils.main_utils.utils import load_object
 from pipeline_prevision.utils.ml_utils.model.estimator import ForecastModel
 from pipeline_prevision.utils.ml_utils.metric.forecasting_metric import get_forecast_score
