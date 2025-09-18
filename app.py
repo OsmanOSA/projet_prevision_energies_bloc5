@@ -118,6 +118,3 @@ async def prediction(payload: PredictionMultiStep):
     
     except Exception as e:
         raise ForecastingException(e, sys)
-    
-if __name__=="__main__":
-    app_run(app,host="localhost",port=8000)
