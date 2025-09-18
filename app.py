@@ -50,14 +50,14 @@ def get_forecast_model():
 async def index():
     return RedirectResponse(url="/docs")
 
-# @app.get("/train")
-# async def train_route():
-#     try:
-#         train_pipeline = TrainingPipeline()
-#         train_pipeline.run_pipeline()
-#         return Response("Training is successful")
-#     except Exception as e:
-#         raise ForecastingException(e, sys)
+@app.get("/train")
+async def train_route():
+    try:
+        train_pipeline = TrainingPipeline()
+        train_pipeline.run_pipeline()
+        return Response("Training is successful")
+    except Exception as e:
+        raise ForecastingException(e, sys)
 
 @app.post("/predict_batchs")
 async def predict_route(request: Request, file: UploadFile = File(...)):
