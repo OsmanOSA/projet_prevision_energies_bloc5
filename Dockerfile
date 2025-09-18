@@ -16,7 +16,7 @@ COPY . /app
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Exposer le port (Heroku utilise $PORT automatiquement)
-EXPOSE 8000
+EXPOSE 80
 
 # Lancer FastAPI avec Uvicorn (Heroku définit $PORT)
-CMD ["python", "app.py"]
+CMD uvicorn app:app --host 0.0.0.0 --port $PORT
