@@ -5,6 +5,7 @@ matplotlib
 plotly
 scikit-learn
 xgboost
+lightgbm
 meteostat
 dill
 pyaml
