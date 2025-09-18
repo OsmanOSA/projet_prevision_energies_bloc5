@@ -16,9 +16,7 @@ from pipeline_prevision.utils.main_utils.utils import load_object
 from pipeline_prevision.utils.ml_utils.model.estimator import ForecastModel
 from pipeline_prevision.utils.ml_utils.metric.forecasting_metric import get_forecast_score
 
-# Mesure mémoire
-process = psutil.Process(os.getpid())
-print(f"Memory usage at start: {process.memory_info().rss / 1024 ** 2:.2f} MB")
+
 
 # FastAPI app
 app = FastAPI()
