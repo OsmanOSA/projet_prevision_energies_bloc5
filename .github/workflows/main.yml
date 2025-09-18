@@ -127,8 +127,12 @@ jobs:
           REGISTRY="${{ steps.login-ecr.outputs.registry }}"
           REPOSITORY="${{ secrets.ECR_REPOSITORY_NAME }}"
           
-          echo "Registry from login-ecr: '$REGISTRY'"
-          echo "Repository from secrets: '$REPOSITORY'"
+          # Nettoyer les espaces et caractères indésirables
+          REGISTRY=$(echo "$REGISTRY" | xargs | tr -d '\r\n' | tr -d ' ')
+          REPOSITORY=$(echo "$REPOSITORY" | xargs | tr -d '\r\n' | tr -d ' ')
+          
+          echo "Registry (cleaned): '$REGISTRY'"
+          echo "Repository (cleaned): '$REPOSITORY'"
           
           # Vérifier que les variables sont définies
           if [ -z "$REGISTRY" ]; then
@@ -142,15 +146,27 @@ jobs:
             exit 1
           fi
           
-          # Construire le nom complet de l'image
+          # Construire le nom complet de l'image (sans espaces)
           FULL_IMAGE_NAME="${REGISTRY}/${REPOSITORY}:latest"
           echo "Full image name: '$FULL_IMAGE_NAME'"
+          
+          # Vérifier qu'il n'y a pas d'espaces dans le nom final
+          if echo "$FULL_IMAGE_NAME" | grep -q ' '; then
+            echo "Error: Image name contains spaces: '$FULL_IMAGE_NAME'"
+            exit 1
+          fi
           
           # Sauvegarder pour les étapes suivantes
           echo "FINAL_IMAGE_NAME=$FULL_IMAGE_NAME" >> $GITHUB_ENV
       
       - name: Pull latest images
         run: |
+          echo "Attempting to pull: '$FINAL_IMAGE_NAME'"
+          # Vérifier encore une fois qu'il n'y a pas d'espaces
+          if echo "$FINAL_IMAGE_NAME" | grep -q ' '; then
+            echo "Error: Image name contains spaces"
+            exit 1
+          fi
           docker pull "$FINAL_IMAGE_NAME"
          
       - name: Stop and remove container if running
