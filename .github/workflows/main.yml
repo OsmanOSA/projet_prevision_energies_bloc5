@@ -29,10 +29,6 @@ jobs:
     name: Continuous Delivery
     needs: integration
     runs-on: ubuntu-latest
-    outputs:
-      image: ${{ steps.build-image.outputs.image }}
-      registry: ${{ steps.login-ecr.outputs.registry }}
-      repository: ${{ secrets.ECR_REPOSITORY_NAME }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -125,36 +121,33 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
       
-      - name: Validate and construct image name
+      - name: Build image name from ECR login
         run: |
-          # Récupérer les outputs du job précédent
-          REGISTRY="${{ needs.build-and-push-ecr-image.outputs.registry }}"
-          REPOSITORY="${{ needs.build-and-push-ecr-image.outputs.repository }}"
-          IMAGE_FROM_OUTPUT="${{ needs.build-and-push-ecr-image.outputs.image }}"
+          # Récupérer le registry directement depuis le login ECR
+          REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+          REPOSITORY="${{ secrets.ECR_REPOSITORY_NAME }}"
           
-          echo "Registry: '$REGISTRY'"
-          echo "Repository: '$REPOSITORY'"
-          echo "Image from output: '$IMAGE_FROM_OUTPUT'"
+          echo "Registry from login-ecr: '$REGISTRY'"
+          echo "Repository from secrets: '$REPOSITORY'"
           
-          # Si l'output existe, l'utiliser, sinon construire l'image
-          if [ -n "$IMAGE_FROM_OUTPUT" ]; then
-            IMAGE_NAME="$IMAGE_FROM_OUTPUT"
-            echo "Using image from output: $IMAGE_NAME"
-          else
-            # Construire le nom de l'image manuellement
-            if [ -z "$REGISTRY" ] || [ -z "$REPOSITORY" ]; then
-              echo "Error: Registry or Repository is empty"
-              echo "Registry: '$REGISTRY'"
-              echo "Repository: '$REPOSITORY'"
-              exit 1
-            fi
-            IMAGE_NAME="${REGISTRY}/${REPOSITORY}:latest"
-            echo "Constructed image name: $IMAGE_NAME"
+          # Vérifier que les variables sont définies
+          if [ -z "$REGISTRY" ]; then
+            echo "Error: ECR Registry is empty. ECR login may have failed."
+            exit 1
           fi
           
-          # Sauvegarder dans les variables d'environnement pour les étapes suivantes
-          echo "FINAL_IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
-          echo "Final image to use: $IMAGE_NAME"
+          if [ -z "$REPOSITORY" ]; then
+            echo "Error: ECR_REPOSITORY_NAME secret is empty"
+            echo "Please check that ECR_REPOSITORY_NAME is configured in GitHub secrets"
+            exit 1
+          fi
+          
+          # Construire le nom complet de l'image
+          FULL_IMAGE_NAME="${REGISTRY}/${REPOSITORY}:latest"
+          echo "Full image name: '$FULL_IMAGE_NAME'"
+          
+          # Sauvegarder pour les étapes suivantes
+          echo "FINAL_IMAGE_NAME=$FULL_IMAGE_NAME" >> $GITHUB_ENV
       
       - name: Pull latest images
         run: |
