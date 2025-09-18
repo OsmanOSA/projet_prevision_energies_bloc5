@@ -29,9 +29,12 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install Heroku CLI
+      - name: Set Heroku Stack to Container
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
         run: |
           curl https://cli-assets.heroku.com/install-ubuntu.sh | sh
+          heroku stack:set container --app ${{ secrets.HEROKU_APP_NAME }}
 
       - name: Deploy to Heroku
         uses: akhileshns/heroku-deploy@v3.13.15
