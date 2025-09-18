@@ -16,4 +16,4 @@ def get_forecast_score(y_true, y_pred) -> ForecastMetricArtifact:
         return ForecastMetricArtifact(mae, mse)
 
     except Exception as e:
-        raise ForecastingException(sys , e)
+        raise ForecastingException(e, sys)
