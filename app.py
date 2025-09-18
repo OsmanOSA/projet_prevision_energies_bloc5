@@ -43,7 +43,6 @@ def get_forecast_model():
         final_model = load_object("final_models/model.pkl")
         model_cache["forecast_model"] = ForecastModel(preprocessor=preprocessor, model=final_model)
         print("Forecast model loaded.")
-        print(f"Memory usage after model load: {process.memory_info().rss / 1024 ** 2:.2f} MB")
     return model_cache["forecast_model"]
 
 # Routes
