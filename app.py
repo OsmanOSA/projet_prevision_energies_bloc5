@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from pipeline_prevision.exception.exception import ForecastingException
-from pipeline_prevision.pipeline.training_pipeline import TrainingPipeline
+#from pipeline_prevision.pipeline.training_pipeline import TrainingPipeline
 from pipeline_prevision.utils.main_utils.utils import load_object
 from pipeline_prevision.utils.ml_utils.model.estimator import ForecastModel
 from pipeline_prevision.utils.ml_utils.metric.forecasting_metric import get_forecast_score
@@ -50,14 +50,14 @@ def get_forecast_model():
 async def index():
     return RedirectResponse(url="/docs")
 
-@app.get("/train")
-async def train_route():
-    try:
-        train_pipeline = TrainingPipeline()
-        train_pipeline.run_pipeline()
-        return Response("Training is successful")
-    except Exception as e:
-        raise ForecastingException(e, sys)
+# @app.get("/train")
+# async def train_route():
+#     try:
+#         train_pipeline = TrainingPipeline()
+#         train_pipeline.run_pipeline()
+#         return Response("Training is successful")
+#     except Exception as e:
+#         raise ForecastingException(e, sys)
 
 @app.post("/predict_batchs")
 async def predict_route(request: Request, file: UploadFile = File(...)):
