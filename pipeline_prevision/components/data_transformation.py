@@ -63,7 +63,7 @@ class DataTransformation:
         try:
            
            imputer:KNNImputer=KNNImputer(**DATA_TRANSFORMATION_IMPUTER_PARAMS)
-           scaler:MinMaxScaler=MinMaxScaler().fit_transform(**DATA_TRANSFORMATION_IMPUTER_PARAMS)
+           scaler:MinMaxScaler=MinMaxScaler()
            logging.info(
                 f"Initialise KNNImputer with {DATA_TRANSFORMATION_IMPUTER_PARAMS}"
             )
