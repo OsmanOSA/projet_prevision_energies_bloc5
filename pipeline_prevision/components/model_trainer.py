@@ -23,7 +23,7 @@ import mlflow
 import dagshub
 
 
-dagshub.init(repo_owner='saidaliosman925', repo_name='projet_prevision_energies_bloc5', mlflow=True)
+#dagshub.init(repo_owner='saidaliosman925', repo_name='projet_prevision_energies_bloc5', mlflow=True)
 
 class ModelTrainer:
 
