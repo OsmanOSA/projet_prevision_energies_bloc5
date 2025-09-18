@@ -32,6 +32,7 @@ jobs:
     outputs:
       image: ${{ steps.build-image.outputs.image }}
       registry: ${{ steps.login-ecr.outputs.registry }}
+      repository: ${{ secrets.ECR_REPOSITORY_NAME }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -104,6 +105,7 @@ jobs:
           
           # Set output for next steps
           echo "image=${FULL_IMAGE_NAME}" >> $GITHUB_OUTPUT
+          echo "Setting output: image=${FULL_IMAGE_NAME}"
 
   Continuous-Deployment:
     needs: build-and-push-ecr-image
@@ -123,19 +125,40 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
       
-      - name: Validate image name
+      - name: Validate and construct image name
         run: |
-          IMAGE_NAME="${{ needs.build-and-push-ecr-image.outputs.image }}"
-          if [ -z "$IMAGE_NAME" ]; then
-            echo "Error: Image name is empty"
-            exit 1
+          # Récupérer les outputs du job précédent
+          REGISTRY="${{ needs.build-and-push-ecr-image.outputs.registry }}"
+          REPOSITORY="${{ needs.build-and-push-ecr-image.outputs.repository }}"
+          IMAGE_FROM_OUTPUT="${{ needs.build-and-push-ecr-image.outputs.image }}"
+          
+          echo "Registry: '$REGISTRY'"
+          echo "Repository: '$REPOSITORY'"
+          echo "Image from output: '$IMAGE_FROM_OUTPUT'"
+          
+          # Si l'output existe, l'utiliser, sinon construire l'image
+          if [ -n "$IMAGE_FROM_OUTPUT" ]; then
+            IMAGE_NAME="$IMAGE_FROM_OUTPUT"
+            echo "Using image from output: $IMAGE_NAME"
+          else
+            # Construire le nom de l'image manuellement
+            if [ -z "$REGISTRY" ] || [ -z "$REPOSITORY" ]; then
+              echo "Error: Registry or Repository is empty"
+              echo "Registry: '$REGISTRY'"
+              echo "Repository: '$REPOSITORY'"
+              exit 1
+            fi
+            IMAGE_NAME="${REGISTRY}/${REPOSITORY}:latest"
+            echo "Constructed image name: $IMAGE_NAME"
           fi
-          echo "Image to pull: $IMAGE_NAME"
+          
+          # Sauvegarder dans les variables d'environnement pour les étapes suivantes
+          echo "FINAL_IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+          echo "Final image to use: $IMAGE_NAME"
       
       - name: Pull latest images
         run: |
-          IMAGE_NAME="${{ needs.build-and-push-ecr-image.outputs.image }}"
-          docker pull "$IMAGE_NAME"
+          docker pull "$FINAL_IMAGE_NAME"
          
       - name: Stop and remove container if running
         run: |
@@ -149,14 +172,13 @@ jobs:
        
       - name: Run Docker Image to serve users
         run: |
-          IMAGE_NAME="${{ needs.build-and-push-ecr-image.outputs.image }}"
           docker run -d -p 8080:8080 \
             --ipc="host" \
             --name=networksecurity \
             -e "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" \
             -e "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
             -e "AWS_REGION=${{ secrets.AWS_REGION }}" \
-            "$IMAGE_NAME"
+            "$FINAL_IMAGE_NAME"
             
       - name: Clean previous images and containers
         run: |
