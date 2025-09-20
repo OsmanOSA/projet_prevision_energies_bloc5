@@ -4,7 +4,7 @@ columns:
   - SOLAR: float64
   - WIND_ONSHORE: float64
   - consommation_totale: float64
-  - temperature: float64
+  - temp: float64
 
 numeric_columns:
   - BIOMASS
@@ -12,4 +12,4 @@ numeric_columns:
   - SOLAR
   - WIND_ONSHORE
   - consommation_totale
-  - temperature
+  - temp
