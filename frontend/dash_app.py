@@ -10,7 +10,7 @@ import os
 import math
 from plotly.subplots import make_subplots
 from statsmodels.tsa.seasonal import seasonal_decompose
-
+from api_client import ForecastAPIClient
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -389,12 +389,6 @@ def get_cached_content(page_name, stored_data, create_function):
 def create_predictions(df, horizon_hours):
     """Créer des prévisions en utilisant les modèles pré-entraînés (inspiré de test.py)"""
     try:
-        # Charger les modèles comme dans test.py
-        model = load_object("final_models/model.pkl")
-        preprocessor = load_object("final_models/preprocessor.pkl")
-        
-        if model is None or preprocessor is None:
-            return None, None, None, None, "Erreur: Impossible de charger les modèles pré-entraînés"
         
         print(f"Colonnes disponibles dans df: {df.columns.tolist()}")
         print(f"Shape des données: {df.shape}")
@@ -413,10 +407,11 @@ def create_predictions(df, horizon_hours):
         print(f"Données avec features ordonnées: {df_features.columns.tolist()}")
         
         # Créer le ForecastModel comme dans test.py
-        forecast_model = ForecastModel(preprocessor=preprocessor, model=model)
+        api_client = ForecastAPIClient()
+        y_pred, y_test, mae, mse = api_client.predict_multistep(df_features, horizon_hours)
         
         # Faire la prédiction avec la méthode predict_multistep
-        y_pred, y_test = forecast_model.predict_multistep(x=df_features, n_futur=horizon_hours)
+        #y_pred, y_test = forecast_model.predict_multistep(x=df_features, n_futur=horizon_hours)
         
         print(f"Type y_pred: {type(y_pred)}, Shape: {y_pred.shape}")
         print(f"Type y_test: {type(y_test)}, Shape: {y_test.shape if y_test is not None else 'None'}")
@@ -2297,4 +2292,7 @@ def create_prediction_visualizations(historical_df, y_pred, y_test, mae, mse, me
         ])
 
 if __name__ == '__main__':
-    app.run_server(debug=True, host='0.0.0.0', port=8050)
+    import os
+    port = int(os.environ.get('PORT', 8050))
+    debug = os.environ.get('DEBUG', 'False').lower() == 'true'
+    app.run_server(debug=debug, host='0.0.0.0', port=port)
