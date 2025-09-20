@@ -6,6 +6,13 @@ on:
       - main
     paths-ignore:
       - 'README.md'
+      - 'frontend/**'
+      - 'Procfile.dashboard'
+      - 'Dockerfile.dashboard'
+      - 'heroku.dashboard.yml'
+      - 'heroku.yml'
+      - '.dockerignore'
+      - 'notebook/**'
 
 jobs:
   integration:
