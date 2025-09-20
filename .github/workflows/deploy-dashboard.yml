@@ -6,14 +6,10 @@ on:
     paths:
       - 'frontend/**'
       - 'requirements.txt'
-      - '.github/workflows/deploy-dashboard.yml'
+      - '.github/workflows/deploy-frontend.yml'
       - 'pipeline_prevision/**'
-    ignore_paths:
-      - 'Dockerfile'
-      - 'frontend/**'
 
 jobs:
-
   integration:
     name: Continuous Integration
     runs-on: ubuntu-latest
@@ -27,48 +23,44 @@ jobs:
       - name: Run unit tests
         run: echo "Running unit tests"
 
-  build-and-deploy-dash_app:
+  build-and-deploy-dash:
+    name: Deploy Frontend
     runs-on: ubuntu-latest
-    
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-        
-    - name: Set Heroku Stack to Container
-      env:
-        HEROKU_API_KEY: ${{secrets.HEROKU_API_KEY}}
-      run: |
-        curl https://cli-assets.heroku.com/install-ubuntu.sh | sh
-        heroku stack:set container --app energiesforecasts-dash
-        
-    - name: Deploy Dash_app to Heroku
-      uses: akhileshns/heroku-deploy@v3.13.15
-      with:
-        heroku_api_key: ${{secrets.HEROKU_API_KEY}}
-        heroku_app_name: "energiesforecasts-dash"
-        heroku_email: ${{secrets.HEROKU_EMAIL}}
-        appdir: "."
-        # Utiliser Docker
-        usedocker: true
-        dockerfile: Dockerfile.dashboard  
-        docker_heroku_process_type: web
-        docker_build_args: --no-cache
-        
-    - name: Set Environment Variables
-      run: |
-        # Variables spécifiques au dashboard
-        heroku config:set DEBUG=False -a energiesforecasts-dash
-        heroku config:set PYTHONPATH=/app -a energiesforecasts-dash
-        
-        # Variables RTE et Meteostat (à configurer dans les secrets GitHub)
-        heroku config:set URL_TOKEN="${{secrets.URL_TOKEN}}" -a energiesforecasts-dash
-        heroku config:set CLIENT_ID="${{secrets.CLIENT_ID}}" -a energiesforecasts-dash
-        heroku config:set CLIENT_SECRET="${{secrets.CLIENT_SECRET}}" -a energiesforecasts-dash
-        heroku config:set BASE_URL_CONSO="${{secrets.BASE_URL_CONSO}}" -a energiesforecasts-dash
-        heroku config:set CLIENT_ID_2="${{secrets.CLIENT_ID_2}}" -a energiesforecasts-dash
-        heroku config:set CLIENT_SECRET_2="${{secrets.CLIENT_SECRET_2}}" -a energiesforecasts-dash
-        heroku config:set BASE_URL_PROD="${{secrets.BASE_URL_PROD}}" -a energiesforecasts-dash
-        heroku config:set LON="${{secrets.LON}}" -a energiesforecasts-dash
-        heroku config:set LAT="${{secrets.LAT}}" -a energiesforecasts-dash
-      env:
-        HEROKU_API_KEY: ${{secrets.HEROKU_API_KEY}}
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set Heroku Stack to Container
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          curl https://cli-assets.heroku.com/install-ubuntu.sh | sh
+          heroku stack:set container --app ${{ secrets.HEROKU_APP_NAME_FRONTEND }}
+
+      - name: Deploy Dash_app to Heroku
+        uses: akhileshns/heroku-deploy@v3.13.15
+        with:
+          heroku_api_key: ${{ secrets.HEROKU_API_KEY }}
+          heroku_app_name: ${{ secrets.HEROKU_APP_NAME_FRONTEND }}
+          heroku_email: ${{ secrets.HEROKU_EMAIL }}
+          appdir: "."
+          usedocker: true
+          dockerfile: Dockerfile.dashboard
+          docker_heroku_process_type: web
+          docker_build_args: --no-cache
+
+      - name: Set Environment Variables
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          heroku config:set DEBUG=False -a ${{ secrets.HEROKU_APP_NAME_FRONTEND }}
+          heroku config:set PYTHONPATH=/app -a ${{ secrets.HEROKU_APP_NAME_FRONTEND }}
+          heroku config:set URL_TOKEN="${{secrets.URL_TOKEN}}" -a ${{ secrets.HEROKU_APP_NAME_FRONTEND }}
+          heroku config:set CLIENT_ID="${{secrets.CLIENT_ID}}" -a ${{ secrets.HEROKU_APP_NAME_FRONTEND }}
+          heroku config:set CLIENT_SECRET="${{secrets.CLIENT_SECRET}}" -a ${{ secrets.HEROKU_APP_NAME_FRONTEND }}
+          heroku config:set BASE_URL_CONSO="${{secrets.BASE_URL_CONSO}}" -a ${{ secrets.HEROKU_APP_NAME_FRONTEND }}
+          heroku config:set CLIENT_ID_2="${{secrets.CLIENT_ID_2}}" -a ${{ secrets.HEROKU_APP_NAME_FRONTEND }}
+          heroku config:set CLIENT_SECRET_2="${{secrets.CLIENT_SECRET_2}}" -a ${{ secrets.HEROKU_APP_NAME_FRONTEND }}
+          heroku config:set BASE_URL_PROD="${{secrets.BASE_URL_PROD}}" -a ${{ secrets.HEROKU_APP_NAME_FRONTEND }}
+          heroku config:set LON="${{secrets.LON}}" -a ${{ secrets.HEROKU_APP_NAME_FRONTEND }}
+          heroku config:set LAT="${{secrets.LAT}}" -a ${{ secrets.HEROKU_APP_NAME_FRONTEND }}
