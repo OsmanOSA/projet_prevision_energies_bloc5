@@ -52,7 +52,18 @@ jobs:
           heroku_email: ${{ secrets.HEROKU_EMAIL }}
           usedocker: true
           dockerfile: Dockerfile
-          
+
           docker_heroku_process_type: web
           docker_build_args: |
             --no-cache
+
+          # Variables d'environnement
+          heroku config:set URL_TOKEN="${{ secrets.URL_TOKEN }}" -a ${{ secrets.HEROKU_APP_NAME }}
+          heroku config:set CLIENT_ID="${{ secrets.CLIENT_ID }}" -a ${{ secrets.HEROKU_APP_NAME }}
+          heroku config:set CLIENT_SECRET="${{ secrets.CLIENT_SECRET }}" -a ${{ secrets.HEROKU_APP_NAME }}
+          heroku config:set BASE_URL_CONSO="${{ secrets.BASE_URL_CONSO }}" -a ${{ secrets.HEROKU_APP_NAME }}
+          heroku config:set CLIENT_ID_2="${{ secrets.CLIENT_ID_2 }}" -a ${{ secrets.HEROKU_APP_NAME }}
+          heroku config:set CLIENT_SECRET_2="${{ secrets.CLIENT_SECRET_2 }}" -a ${{ secrets.HEROKU_APP_NAME }}
+          heroku config:set BASE_URL_PROD="${{ secrets.BASE_URL_PROD }}" -a ${{ secrets.HEROKU_APP_NAME }}
+          heroku config:set LON="${{ secrets.LON }}" -a ${{ secrets.HEROKU_APP_NAME }}
+          heroku config:set LAT="${{ secrets.LAT }}" -a ${{ secrets.HEROKU_APP_NAME }}
