@@ -51,15 +51,15 @@ jobs:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
         run: |
           heroku config:set \
-            URL_TOKEN=${{ secrets.URL_TOKEN }} \
-            CLIENT_ID=${{ secrets.CLIENT_ID }} \
-            CLIENT_SECRET=${{ secrets.CLIENT_SECRET }} \
-            BASE_URL_CONSO=${{ secrets.BASE_URL_CONSO }} \
-            CLIENT_ID_2=${{ secrets.CLIENT_ID_2 }} \
-            CLIENT_SECRET_2=${{ secrets.CLIENT_SECRET_2 }} \
-            BASE_URL_PROD=${{ secrets.BASE_URL_PROD }} \
-            LON=${{ secrets.LON }} \
-            LAT=${{ secrets.LAT }} \
+            URL_TOKEN="${{ secrets.URL_TOKEN }}" \
+            CLIENT_ID="${{ secrets.CLIENT_ID }}" \
+            CLIENT_SECRET="${{ secrets.CLIENT_SECRET }}" \
+            BASE_URL_CONSO="${{ secrets.BASE_URL_CONSO }}" \
+            CLIENT_ID_2="${{ secrets.CLIENT_ID_2 }}" \
+            CLIENT_SECRET_2="${{ secrets.CLIENT_SECRET_2 }}" \
+            BASE_URL_PROD="${{ secrets.BASE_URL_PROD }}" \
+            LON="${{ secrets.LON }}" \
+            LAT="${{ secrets.LAT }}" \
             --app ${{ secrets.HEROKU_APP_NAME }}
 
       - name: Deploy to Heroku
