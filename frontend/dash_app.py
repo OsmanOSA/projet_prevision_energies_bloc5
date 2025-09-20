@@ -20,8 +20,6 @@ from pipeline_prevision.utils.ml_utils.metric.forecasting_metric import get_fore
 from pipeline_prevision.constant.training_pipeline import LOOKBACK, HORIZON
 import pickle
 
-
-
 # Initialiser l'application Dash avec support multi-pages
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
 
