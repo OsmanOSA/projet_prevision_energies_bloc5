@@ -8,13 +8,17 @@ on:
       - 'requirements.txt'
       - '.github/workflows/deploy-dashboard.yml'
       - 'pipeline_prevision/**'
+      - 'Procfile.dashboard'
+      - 'Dockerfile.dashboard'
+      - 'heroku.yml'
+      
     ignore_paths:
       - 'Dockerfile'
       - 'frontend/**'
+      - 'Procfile'
       - 'github/workflows/main.yml'
 
 jobs:
-
   integration:
     name: Continuous Integration
     runs-on: ubuntu-latest
