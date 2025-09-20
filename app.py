@@ -15,6 +15,7 @@ from pipeline_prevision.utils.main_utils.utils import load_object
 from pipeline_prevision.utils.ml_utils.model.estimator import ForecastModel
 from pipeline_prevision.utils.ml_utils.metric.forecasting_metric import get_forecast_score
 
+os.environ["GIT_PYTHON_REFRESH"] = "quiet"
 
 
 # FastAPI app
