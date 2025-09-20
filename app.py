@@ -7,6 +7,7 @@ from io import BytesIO
 from fastapi import FastAPI, File, UploadFile, Request
 from fastapi.responses import Response, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.wsgi import WSGIMiddleware
 from pydantic import BaseModel
 
 from pipeline_prevision.exception.exception import ForecastingException
@@ -17,9 +18,12 @@ from pipeline_prevision.utils.ml_utils.metric.forecasting_metric import get_fore
 
 os.environ["GIT_PYTHON_REFRESH"] = "quiet"
 
+# Import Dash app
+sys.path.append(os.path.join(os.path.dirname(__file__), 'frontend'))
+from dash_app import app as dash_app
 
 # FastAPI app
-app = FastAPI()
+app = FastAPI(title="Energy Forecasting API + Dashboard", version="1.0.0")
 origins = ["*"]
 app.add_middleware(
     CORSMiddleware,
@@ -46,9 +50,16 @@ def get_forecast_model():
         print("Forecast model loaded.")
     return model_cache["forecast_model"]
 
-# Routes
+# Monter l'application Dash sur /dashboard
+app.mount("/dashboard", WSGIMiddleware(dash_app.server))
+
+# Routes API
 @app.get("/", tags=["authentication"])
 async def index():
+    return {"message": "Energy Forecasting API + Dashboard", "dashboard": "/dashboard", "docs": "/docs"}
+
+@app.get("/api", tags=["authentication"])
+async def api_docs():
     return RedirectResponse(url="/docs")
 
 # @app.get("/train")
