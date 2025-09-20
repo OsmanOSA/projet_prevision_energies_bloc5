@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 
 from pathlib import Path
+from datetime import datetime, timedelta
 
 
 """
@@ -13,6 +14,9 @@ from pathlib import Path
 
 LOOKBACK: int = 36
 HORIZON: int = 1
+SIX_MONTHS = timedelta(days=30*6)
+FIVE_MONTHS = timedelta(days=30*5)
+TYPE_SOURCE = ['SOLAR', 'BIOMASS', 'WIND_ONSHORE', 'NUCLEAR']
 
 PIPELINE_NAME: str = "pipeline_prevision"
 ARTIFACT_DIR: str = "Artifacts"
