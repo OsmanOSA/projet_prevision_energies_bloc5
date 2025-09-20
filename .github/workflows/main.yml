@@ -50,15 +50,17 @@ jobs:
         env:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
         run: |
-          heroku config:set URL_TOKEN=${{ secrets.URL_TOKEN }} --app ${{ secrets.HEROKU_APP_NAME }}
-          heroku config:set CLIENT_ID=${{ secrets.CLIENT_ID }} --app ${{ secrets.HEROKU_APP_NAME }}
-          heroku config:set CLIENT_SECRET=${{ secrets.CLIENT_SECRET }} --app ${{ secrets.HEROKU_APP_NAME }}
-          heroku config:set BASE_URL_CONSO=${{ secrets.BASE_URL_CONSO }} --app ${{ secrets.HEROKU_APP_NAME }}
-          heroku config:set CLIENT_ID_2=${{ secrets.CLIENT_ID_2 }} --app ${{ secrets.HEROKU_APP_NAME }}
-          heroku config:set CLIENT_SECRET_2=${{ secrets.CLIENT_SECRET_2 }} --app ${{ secrets.HEROKU_APP_NAME }}
-          heroku config:set BASE_URL_PROD=${{ secrets.BASE_URL_PROD }} --app ${{ secrets.HEROKU_APP_NAME }}
-          heroku config:set LON=${{ secrets.LON }} --app ${{ secrets.HEROKU_APP_NAME }}
-          heroku config:set LAT=${{ secrets.LAT }} --app ${{ secrets.HEROKU_APP_NAME }}
+          heroku config:set \
+            URL_TOKEN=${{ secrets.URL_TOKEN }} \
+            CLIENT_ID=${{ secrets.CLIENT_ID }} \
+            CLIENT_SECRET=${{ secrets.CLIENT_SECRET }} \
+            BASE_URL_CONSO=${{ secrets.BASE_URL_CONSO }} \
+            CLIENT_ID_2=${{ secrets.CLIENT_ID_2 }} \
+            CLIENT_SECRET_2=${{ secrets.CLIENT_SECRET_2 }} \
+            BASE_URL_PROD=${{ secrets.BASE_URL_PROD }} \
+            LON=${{ secrets.LON }} \
+            LAT=${{ secrets.LAT }} \
+            --app ${{ secrets.HEROKU_APP_NAME }}
 
       - name: Deploy to Heroku
         uses: akhileshns/heroku-deploy@v3.13.15
