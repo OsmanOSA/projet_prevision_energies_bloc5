@@ -1,0 +1,6 @@
+build:
+  docker:
+    web: Dockerfile.dashboard
+
+run:
+  web: python frontend/dash_app.py
