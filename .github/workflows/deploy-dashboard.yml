@@ -11,7 +11,7 @@ on:
       - 'Procfile.dashboard'
       - 'Dockerfile.dashboard'
       - 'heroku.yml'
-      
+
     ignore_paths:
       - 'Dockerfile'
       - 'frontend/**'
@@ -52,7 +52,7 @@ jobs:
         heroku_api_key: ${{ secrets.HEROKU_API_KEY }}
         heroku_app_name: ${{ secrets.HEROKU_APP_NAME_FRONTEND }}
         heroku_email: ${{ secrets.HEROKU_EMAIL }}
-        appdir: "."
+        
         # Utiliser Docker
         usedocker: true
         dockerfile: Dockerfile.dashboard  
@@ -78,3 +78,5 @@ jobs:
         heroku config:set LAT="${{ secrets.LAT }}" -a ${{ secrets.HEROKU_APP_NAME_FRONTEND }}
       env:
         HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+
+      
