@@ -1,0 +1,325 @@
+/* Styles généraux pour l'application de Simulation de Réseau Électrique */
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
+
+/* Styles globaux */
+html, body, [class*="css"] {
+    font-family: 'Poppins', sans-serif;
+}
+
+/* Styles pour StreamLit */
+.stApp {
+    background: linear-gradient(135deg, #f5f7fa 0%, #e4e9f2 100%) !important;
+}
+
+/* Titre principal */
+.main-title, h1 {
+    color: #72d09a !important;
+    font-weight: 600;
+    font-size: 2.5rem;
+    margin-bottom: 2rem;
+    text-align: center;
+    border-bottom: 2px solid rgba(60, 245, 205, 0.2);
+    padding-bottom: 1rem;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    background: linear-gradient(90deg, #72d09a, #72d09a);
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+
+/* Sous-titres */
+h2 {
+    color: #2c3e50 !important;
+    font-weight: 600;
+    font-size: 1.8rem;
+    margin-top: 2rem;
+    margin-bottom: 1rem;
+    border-left: 4px solid #72d09a;
+    padding-left: 10px;
+}
+
+h3 {
+    color: #34495e !important;
+    font-weight: 500;
+    font-size: 1.4rem;
+    margin-top: 1.5rem;
+    margin-bottom: 1rem;
+    text-align: center;
+}
+
+p {
+    color: #34495e !important;
+    font-weight: 500;
+    font-size: 1.4rem;
+    margin-top: 1.5rem;
+    margin-bottom: 1rem;
+    text-align: center;
+}
+
+/* Personnalisation de la barre latérale */
+.stSidebar {
+    background: linear-gradient(160deg, #f53c55, white) !important;
+    border-right: none;
+    box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+}
+
+.stSidebar h2 {
+    color: #2c3e50 !important;
+    text-align: center;
+    border-left: none;
+    border-bottom: 2px solid rgba(44, 62, 80, 0.2);
+    padding-bottom: 10px;
+    margin-bottom: 20px;
+}
+
+/* Texte dans la sidebar */
+.stSidebar p, .stSidebar div, .stSidebar span, .stSidebar label {
+    color: #2c3e50 !important;
+}
+
+.stSidebar hr {
+    border-color: rgba(44, 62, 80, 0.2) !important;
+    margin: 20px 0 !important;
+}
+
+/* Amélioration des radio buttons dans le sidebar */
+.stSidebar .stRadio > div {
+    background-color: rgba(255, 255, 255, 0.4);
+    border-radius: 8px;
+    padding: 10px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+    margin-bottom: 10px;
+}
+
+.stSidebar .stRadio label {
+    font-weight: 500;
+    padding: 8px 5px;
+    border-radius: 5px;
+    transition: all 0.2s ease;
+    color: #2c3e50 !important;
+}
+
+.stSidebar .stRadio label:hover {
+    background-color: rgba(255, 255, 255, 0.6);
+}
+
+/* Messages de succès dans la sidebar */
+.stSidebar .stSuccess {
+    background-color: rgba(76, 175, 80, 0.2) !important;
+    border-color: #72d09a !important;
+}
+
+.stSidebar .stSuccess p {
+    color: #1b5e20 !important;
+    font-weight: 500 !important;
+}
+
+/* Personnalisation des boutons */
+.stButton > button {
+    background: linear-gradient(90deg, #72d09a, #72d09a) !important;
+    color: white !important;
+    border-radius: 30px;
+    padding: 0.5rem 1.5rem;
+    font-weight: 500;
+    border: none;
+    box-shadow: 0 4px 10px rgba(245, 60, 60, 0.3);
+    transition: all 0.3s ease;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-size: 0.9rem;
+}
+
+.stButton > button:hover {
+    background: linear-gradient(90deg, #72d09a, #72d09a) !important;
+    box-shadow: 0 6px 12px rgba(245, 60, 60, 0.4);
+    transform: translateY(-2px);
+}
+
+.stButton > button:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* Style pour le pied de page - ressemblant aux cartes du haut */
+.footer {
+    background: white !important;
+    border: none !important;
+    border-top: 4px solid #72d09a !important;
+    padding: 20px !important;
+    margin-top: 40px !important;
+    color: #2c3e50 !important;
+    border-radius: 12px !important;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08) !important;
+}
+
+.footer .page-indicator {
+    font-size: 1rem !important;
+    color: #2c3e50 !important;
+    margin-bottom: 15px !important;
+    text-align: center !important;
+    font-weight: 500 !important;
+}
+
+.footer .page-indicator strong {
+    color: #f53c3c !important;
+}
+
+/* Style pour les boutons précédent/suivant en bas de page */
+.prev-button button, .next-button button {
+    width: 100% !important;
+    font-size: 1rem !important;
+    font-weight: 600 !important;
+    padding: 0.8rem !important;
+    border-radius: 30px !important;
+    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.15) !important;
+    margin: 0.5rem 0 !important;
+    border: none !important;
+    background: white !important;
+    color: #f53c3c !important;
+    border: 1px solid #f53c3c !important;
+    transition: all 0.3s ease !important;
+}
+
+.prev-button button:hover, .next-button button:hover {
+    background: #f53c3c !important;
+    color: white !important;
+    transform: translateY(-3px) !important;
+    box-shadow: 0 5px 10px rgba(245, 60, 60, 0.2) !important;
+}
+
+.prev-button button:disabled, .next-button button:disabled {
+    background: #f0f0f0 !important;
+    color: #bdbdbd !important;
+    border: 1px solid #bdbdbd !important;
+    transform: none !important;
+    box-shadow: none !important;
+    cursor: not-allowed !important;
+}
+
+/* Style pour les cartes */
+.card {
+    background-color: white !important;
+    border-radius: 12px !important;
+    padding: 25px !important;
+    margin: 15px 0 !important;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08) !important;
+    border: none !important;
+    border-top: 4px solid #72d09a !important;
+    transition: transform 0.3s ease, box-shadow 0.3s ease !important;
+}
+
+.card:hover {
+    transform: translateY(-5px) !important;
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.12) !important;
+}
+
+/* Amélioration des messages d'état */
+.stAlert {
+    border-radius: 10px !important;
+    border-left-width: 10px !important;
+    padding: 15px !important;
+    margin: 15px 0 !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+}
+
+.stSuccess {
+    background-color: #e8f5e9 !important;
+    border-color: #4caf50 !important;
+}
+
+.stSuccess p {
+    color: #1b5e20 !important;
+    font-weight: 500 !important;
+}
+
+.stInfo {
+    background-color: #e3f2fd !important;
+    border-color: #f53c3c !important;
+}
+
+.stInfo p {
+    color: #d62c2c !important;
+    font-weight: 500 !important;
+}
+
+/* Personnalisation des widgets d'entrée */
+.stTextInput > div > div {
+    border-radius: 8px !important;
+    border: 1px solid #e0e0e0 !important;
+    transition: all 0.3s ease !important;
+}
+
+.stNumberInput > div > div {
+    border-radius: 8px !important;
+    border: 1px solid #e0e0e0 !important;
+}
+
+.stTextInput input, .stNumberInput input {
+    height: 40px !important;
+    font-size: 1rem !important;
+    padding: 0 15px !important;
+}
+
+.stTextInput > div > div:focus-within, .stNumberInput > div > div:focus-within {
+    border-color: #f53c3c !important;
+    box-shadow: 0 0 0 2px rgba(245, 60, 60, 0.2) !important;
+}
+
+/* Style pour les sélecteurs (selectbox) */
+.stSelectbox > div[data-baseweb="select"] {
+    border-radius: 8px !important;
+    border: 1px solid #e0e0e0 !important;
+    transition: all 0.3s ease !important;
+}
+
+.stSelectbox > div[data-baseweb="select"]:focus-within {
+    border-color: #f53c3c !important;
+    box-shadow: 0 0 0 2px rgba(245, 60, 60, 0.2) !important;
+}
+
+/* Style pour les graphiques
+[data-testid="stPlotlyChart"], .stPlot {
+    background: white !important;
+    border-radius: 12px !important;
+    padding: 20px !important;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08) !important;
+    margin: 20px 0 !important;
+    border: 1px solid #f0f0f0 !important;
+} */
+
+/* Animation pour les boutons */
+@keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(245, 60, 60, 0.7); }
+    70% { box-shadow: 0 0 0 10px rgba(245, 60, 60, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(245, 60, 60, 0); }
+}
+
+.stButton > button:active {
+    animation: pulse 0.3s;
+}
+
+/* Styles responsifs */
+@media (max-width: 768px) {
+    .main-title, h1 {
+        font-size: 1.8rem;
+    }
+    
+    h2 {
+        font-size: 1.5rem;
+    }
+    
+    h3 {
+        font-size: 1.2rem;
+    }
+    
+    .card {
+        padding: 15px !important;
+    }
+}
+
+/* Texte en vert et souligné */
+.green-underline {
+    color: #72d09a !important;
+    text-decoration: underline;
+    font-weight: 500;
+}

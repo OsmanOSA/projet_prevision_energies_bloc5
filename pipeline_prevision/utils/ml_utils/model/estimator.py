@@ -45,64 +45,89 @@ class ForecastModel:
 
             print("y pred shape:", y_pred.shape)
             print("y tes shape:", y_transform.shape)
+            
+            
+            y_pred_inverse = self.preprocessor.named_steps['scaler'].inverse_transform(y_pred)
+            y_transform_inverse = self.preprocessor.named_steps['scaler'].inverse_transform(y_transform)
 
-            return y_pred, y_transform
+            return y_pred_inverse, y_transform_inverse
 
         except Exception as e:
             raise ForecastingException(e, sys)
         
 
     def predict_multistep(self, x, n_futur: int):
-    
+        
         try:
-            # Transformation des données (scaling, encoding, etc.)
+            # Transformation des données
             x_transform = self.preprocessor.transform(x)
-
+            
             # Génération des séquences
-            x_windows, y_windows = window_generator(
-                                                data=x_transform,
-                                                lookback=LOOKBACK,
-                                                horizon=HORIZON)
+            if x_transform.shape[0] == LOOKBACK:
+                n_features = x_transform.shape[1]
+                n_samples = 1
+                x_seq = x_transform.reshape(n_samples, LOOKBACK*n_features)
+                y_preds = np.zeros((n_samples, n_futur, n_features))
+                
+                # Prédiction directe
+                for step in range(n_futur):
+                    y_pred = self.model.predict(x_seq)
+                    y_pred = y_pred.reshape(n_samples, n_features)
+                    y_preds[:, step, :] = y_pred
 
-            if x_windows.shape[0] == 0:
-                raise ValueError(
-                    f"Pas assez de séquences pour faire une prédiction. "
-                    f"(lookback={LOOKBACK}, horizon={HORIZON})"
+                    # reconstruire en 3D et shift
+                    x_seq_reshaped = x_seq.reshape(n_samples, LOOKBACK, n_features)
+                    x_seq_reshaped = np.concatenate(
+                        [x_seq_reshaped[:, 1:, :], np.repeat(y_pred[:, np.newaxis, :], 1, axis=1)],
+                        axis=1
+                    )
+                    x_seq = x_seq_reshaped.reshape(n_samples, LOOKBACK * n_features)
+
+                y_preds_inverse = self.preprocessor.named_steps['scaler'].inverse_transform(
+                    y_preds.reshape(-1, n_features)
+                )
+                return y_preds_inverse, None
+
+            else:
+                # Cas général avec window_generator
+                x_windows, y_windows = window_generator(
+                    data=x_transform,
+                    lookback=LOOKBACK,
+                    horizon=HORIZON
                 )
 
-            # Mise en forme initiale
-            n_samples, lookback, n_features = x_windows.shape
-            n_targets = y_windows.shape[2]
+                if x_windows.shape[0] == 0:
+                    raise ValueError(
+                        f"Pas assez de séquences pour faire une prédiction. "
+                        f"(lookback={LOOKBACK}, horizon={HORIZON})"
+                    )
 
-            # Aplatir pour correspondre au modèle (MLP/sklearn)
-            x_seq = x_windows.reshape(n_samples, lookback * n_features)
+                n_samples, lookback_len, n_features = x_windows.shape
+                n_features = y_windows.shape[2]
 
-            # Stockage des prédictions
-            y_preds = np.zeros((n_samples, n_futur, n_targets))
+                x_seq = x_windows.reshape(n_samples, lookback_len * n_features)
+                y_preds = np.zeros((n_samples, n_futur, n_features))
 
-            for step in range(n_futur):
-                # 1) prédiction du prochain pas
-                y_pred = self.model.predict(x_seq)
-                y_pred = y_pred.reshape(n_samples, n_targets)
+                for step in range(n_futur):
+                    y_pred = self.model.predict(x_seq)
+                    y_pred = y_pred.reshape(n_samples, n_features)
+                    y_preds[:, step, :] = y_pred
 
-                y_preds[:, step, :] = y_pred
+                    x_seq_reshaped = x_seq.reshape(n_samples, lookback_len, n_features)
+                    x_seq_reshaped = np.concatenate(
+                        [x_seq_reshaped[:, 1:, :], np.repeat(y_pred[:, np.newaxis, :], 1, axis=1)],
+                        axis=1
+                    )
+                    x_seq = x_seq_reshaped.reshape(n_samples, lookback_len * n_features)
 
-                # 2) mise à jour des séquences : on décale la fenêtre et on insère y_pred
-                # reconstruire en 3D (batch, lookback, features)
-                x_seq_reshaped = x_seq.reshape(n_samples, lookback, n_features)
-
-                # shift left et insérer la prédiction dans les colonnes cibles (ici dernières colonnes)
-                x_seq_reshaped = np.concatenate(
-                    [x_seq_reshaped[:, 1:, :],
-                    np.repeat(y_pred[:, np.newaxis, :], 1, axis=1)], axis=1
+                y_preds_inverse = self.preprocessor.named_steps['scaler'].inverse_transform(
+                    y_preds[::n_futur, :, :].reshape(-1, n_features)
+                )
+                y_windows_inverse = self.preprocessor.named_steps['scaler'].inverse_transform(
+                    y_windows.reshape(-1, n_features)
                 )
 
-                x_seq = x_seq_reshaped.reshape(n_samples, lookback * n_features)
-
-            print("y_preds shape:", y_preds.shape)
-            print("y_true shape:", y_windows.shape)
-
-            return y_preds, y_windows
+                return y_preds_inverse, y_windows_inverse
 
         except Exception as e:
             raise ForecastingException(e, sys)

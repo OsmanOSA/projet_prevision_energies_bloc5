@@ -4,3 +4,5 @@ __pycache__
 .venv
 logs
 Artifacts
+catboost_info
+logs.log

@@ -90,4 +90,5 @@ async def prediction(payload: PredictionMultiStep):
 
 # Démarrage avec port dynamique
 if __name__ == "__main__":
-   uvicorn.run(app)
+    import uvicorn
+    uvicorn.run(app)
