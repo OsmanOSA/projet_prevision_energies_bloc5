@@ -25,6 +25,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 COPY frontend/ ./frontend/
 COPY pipeline_prevision/ ./pipeline_prevision/
 COPY data_schema/ ./data_schema/
+COPY final_models/ ./final_models/
 
 # Créer un utilisateur non-root pour la sécurité
 RUN useradd --create-home --shell /bin/bash app && \
@@ -36,7 +37,6 @@ EXPOSE 8050
 
 # Variables d'environnement par défaut
 ENV DEBUG=False
-ENV PORT=8050
 
 # Commande de démarrage
 CMD ["python", "frontend/dash_app.py"]

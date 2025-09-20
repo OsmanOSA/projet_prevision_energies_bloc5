@@ -6,7 +6,6 @@ on:
     paths:
       - 'frontend/**'
       - 'requirements.txt'
-      - 'Procfile.dashboard'
       - '.github/workflows/deploy-dashboard.yml'
       - 'pipeline_prevision/**'
 
@@ -48,6 +47,7 @@ jobs:
         appdir: "."
         # Utiliser Docker
         usedocker: true
+        dockerfile: Dockerfile.dashboard  
         docker_heroku_process_type: web
         docker_build_args: |
           --no-cache
