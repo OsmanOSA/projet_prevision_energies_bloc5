@@ -1745,11 +1745,9 @@ def create_prediction_tab(df):
         # Informations sur les modèles
         html.Div([
             html.H4("Informations sur les Modèles", style={'color': '#2c3e50', 'marginBottom': '15px'}),
-            html.P("Cette section utilise les modèles pré-entraînés disponibles dans votre pipeline pour générer des prévisions énergétiques.", 
+            html.P("Cette section utilise le modèle pré-entraîné disponible sur Heroku pour générer des prévisions énergétiques.", 
                    style={'marginBottom': '10px'}),
-            html.P("Les prévisions sont basées sur les données historiques et les patterns identifiés par les algorithmes de Machine Learning.", 
-                   style={'marginBottom': '10px'}),
-            html.P("Vous pouvez ajuster l'horizon de prévision et le type de variable à prédire selon vos besoins d'analyse.", 
+            html.P("Vous pouvez ajuster l'horizon de prévision selon vos besoins d'analyse.", 
                    style={'marginBottom': '0'})
         ], style={'backgroundColor': '#e3f2fd', 'padding': '20px', 'borderRadius': '8px',
                  'border': '1px solid #bbdefb', 'marginTop': '25px'})

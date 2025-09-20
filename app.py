@@ -50,14 +50,14 @@ def get_forecast_model():
 async def index():
     return RedirectResponse(url="/docs")
 
-@app.get("/train")
-async def train_route():
-    try:
-        train_pipeline = TrainingPipeline()
-        train_pipeline.run_pipeline()
-        return Response("Training is successful")
-    except Exception as e:
-        raise ForecastingException(e, sys)
+# @app.get("/train")
+# async def train_route():
+#     try:
+#         train_pipeline = TrainingPipeline()
+#         train_pipeline.run_pipeline()
+#         return Response("Training is successful")
+#     except Exception as e:
+#         raise ForecastingException(e, sys)
 
 @app.post("/predict_batchs")
 async def predict_route(request: Request, file: UploadFile = File(...)):
@@ -78,13 +78,23 @@ async def prediction(payload: PredictionMultiStep):
     try:
         forecast_model = get_forecast_model()
         y_pred, y_test = forecast_model.predict_multistep(x=payload.data, n_futur=payload.n_future)
-        forecast_metric = get_forecast_score(y_true=y_test, y_pred=y_pred)
-        return {
-            "Pred": np.asarray(y_pred).tolist(),
-            "Test": np.asarray(y_test).tolist(),
-            "MAE": float(forecast_metric.mae),
-            "MSE": float(forecast_metric.mse)
-        }
+        
+        if y_test is not None:
+            forecast_metric = get_forecast_score(y_true=y_test, y_pred=y_pred)
+            return {
+                "Pred": np.asarray(y_pred).tolist(),
+                "Test": np.asarray(y_test).tolist(),
+                "MAE": float(forecast_metric.mae),
+                "MSE": float(forecast_metric.mse)
+            }
+            
+        else:
+            return {
+                "Pred": np.asarray(y_pred).tolist(),
+                "Test": None, 
+                "MAE": None,
+                "MSE": None}
+            
     except Exception as e:
         raise ForecastingException(e, sys)
 
