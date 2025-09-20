@@ -27,7 +27,7 @@ jobs:
       - name: Run unit tests
         run: echo "Running unit tests"
 
-  build and deploy-dash_app:
+  build-and-deploy-dash_app:
     runs-on: ubuntu-latest
     
     steps:
