@@ -23,7 +23,8 @@ import pickle
 # Initialiser l'application Dash avec support multi-pages
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
 
-# Styles CSS personnalisés
+# Styles CSS 
+
 SIDEBAR_STYLE = {
     "position": "fixed",
     "top": 0,
