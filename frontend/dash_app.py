@@ -418,31 +418,6 @@ def create_predictions(df, horizon_hours):
         print(f"Type y_pred: {type(y_pred)}, Shape: {y_pred.shape}")
         print(f"Type y_test: {type(y_test)}, Shape: {y_test.shape if y_test is not None else 'None'}")
         
-        # Vérifier et ajuster la shape de y_pred si nécessaire
-        if y_pred is not None:
-            print(f"Shape originale y_pred: {y_pred.shape}")
-            
-            # Le modèle peut retourner différentes shapes selon le cas
-            if len(y_pred.shape) == 2:
-                # Shape (n_steps, n_features) - cas normal
-                if y_pred.shape[0] != horizon_hours:
-                    print(f"Ajustement nécessaire: {y_pred.shape[0]} steps vs {horizon_hours} demandés")
-                    if y_pred.shape[0] < horizon_hours:
-                        # Répéter la dernière prédiction pour combler
-                        last_pred = y_pred[-1:, :]
-                        missing_steps = horizon_hours - y_pred.shape[0]
-                        repeated_preds = np.repeat(last_pred, missing_steps, axis=0)
-                        y_pred = np.vstack([y_pred, repeated_preds])
-                    else:
-                        # Tronquer si on a trop
-                        y_pred = y_pred[:horizon_hours, :]
-                    print(f"y_pred ajusté à: {y_pred.shape}")
-            else:
-                print(f"Shape inattendue pour y_pred: {y_pred.shape}")
-                # Essayer de reformater si nécessaire
-                if y_pred.size == horizon_hours * 6:  # 6 features
-                    y_pred = y_pred.reshape(horizon_hours, 6)
-                    print(f"y_pred reformaté à: {y_pred.shape}")
         
         # Calculer les métriques seulement si on a y_test (mode test/validation)
         mae, mse, metrics_by_energy = None, None, None
