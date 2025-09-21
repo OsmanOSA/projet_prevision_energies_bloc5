@@ -1067,7 +1067,7 @@ def create_overview_tab(df):
             
             html.Div([
                 html.H2(f"{total_production:.0f} MWh", style={'color': '#27ae60', 'margin': '0'}),
-                html.P("Production Totale", style={'margin': '10px 0', 'fontSize': '16px'})
+                html.P("Production totale", style={'margin': '10px 0', 'fontSize': '16px'})
             ], style={'backgroundColor': '#fff', 'padding': '25px', 'borderRadius': '12px',
                      'boxShadow': '0 4px 6px rgba(0,0,0,0.1)', 'textAlign': 'center', 'flex': '1'}),
             
@@ -1854,7 +1854,7 @@ def create_deficit_evolution(deficit_data):
                      annotation_text="Équilibre", annotation_position="bottom right")
         
         fig.update_layout(
-            title='Évolution du Déficit Énergétique (Production - Consommation)',
+            title='Évolution du Déficit Énergétique (Prod - Conso)',
             title_font_size=16,
             xaxis_title='Date',
             yaxis_title='Déficit (MW)',
@@ -1862,7 +1862,7 @@ def create_deficit_evolution(deficit_data):
             showlegend=False,
             annotations=[
                 dict(x=0.02, y=0.98, xref="paper", yref="paper",
-                     text="Surplus (Production > Consommation) Déficit (Production < Consommation)", 
+
                      showarrow=False,
                      font=dict(size=11, color='black'), 
                      bgcolor="rgba(255,255,255,0.9)",
@@ -1914,11 +1914,11 @@ def create_consumption_vs_production(df):
             mode='lines',
             name='Production totale',
             line=dict(color='#27ae60', width=2),
-            hovertemplate='<b>Production Totale</b><br>Date: %{x}<br>Valeur: %{y:.0f} MW<extra></extra>'
+            hovertemplate='<b>Production totale</b><br>Date: %{x}<br>Valeur: %{y:.0f} MW<extra></extra>'
         ))
         
         fig.update_layout(
-            title='Comparaison Consommation vs Production Totale',
+            title='Comparaison Consommation vs Production totale',
             title_font_size=16,
             xaxis_title='Date',
             yaxis_title='Puissance (MW)',
