@@ -51,7 +51,7 @@ def get_forecast_model():
     if "forecast_model" not in model_cache:
         print("Loading forecast model...")
         preprocessor = load_object("final_models/preprocessor.pkl")
-        final_model = pyfunc.load_model(f"models:/{MODEL_NAME}/{STAGE}")
+        final_model = pyfunc.load_model(f"models:/{MODEL_NAME}/")
         print("Model loaded from mlflow.")
         model_cache["forecast_model"] = ForecastModel(preprocessor=preprocessor, model=final_model)
         print("Forecast model loaded.")
