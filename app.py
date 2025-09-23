@@ -3,6 +3,7 @@ import os
 import pandas as pd
 import numpy as np
 
+
 from io import BytesIO
 from fastapi import FastAPI, File, UploadFile, Request
 from fastapi.responses import Response, RedirectResponse
@@ -15,6 +16,11 @@ from pipeline_prevision.pipeline.training_pipeline import TrainingPipeline
 from pipeline_prevision.utils.main_utils.utils import load_object
 from pipeline_prevision.utils.ml_utils.model.estimator import ForecastModel
 from pipeline_prevision.utils.ml_utils.metric.forecasting_metric import get_forecast_score
+
+from mlflow import pyfunc
+
+MODEL_NAME = "forecasting_model"
+STAGE = "Production"
 
 os.environ["GIT_PYTHON_REFRESH"] = "quiet"
 
@@ -45,7 +51,8 @@ def get_forecast_model():
     if "forecast_model" not in model_cache:
         print("Loading forecast model...")
         preprocessor = load_object("final_models/preprocessor.pkl")
-        final_model = load_object("final_models/model.pkl")
+        final_model = pyfunc.load_model(f"models:/{MODEL_NAME}/{STAGE}")
+        print("Model loaded from mlflow.")
         model_cache["forecast_model"] = ForecastModel(preprocessor=preprocessor, model=final_model)
         print("Forecast model loaded.")
     return model_cache["forecast_model"]
@@ -110,7 +117,6 @@ async def prediction(payload: PredictionMultiStep):
     except Exception as e:
         raise ForecastingException(e, sys)
 
-# Démarrage avec port dynamique
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app)
