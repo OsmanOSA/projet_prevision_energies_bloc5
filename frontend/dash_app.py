@@ -419,14 +419,14 @@ def create_predictions(df, horizon_hours):
         print(f"Données avec features ordonnées: {df_features.columns.tolist()}")
         
         # Créer le ForecastModel comme dans test.py
-        #api_client = ForecastAPIClient()
-        #y_pred, y_test, mae, mse = api_client.predict_multistep(df_features, horizon_hours)
+        api_client = ForecastAPIClient()
+        y_pred, y_test, mae, mse = api_client.predict_multistep(df_features, horizon_hours)
         
-        model = load_object(r"D:\Nouveau dossier\TitreRNCP_Bloc1\projet_prevision_energies_bloc5\final_models\model.pkl")
-        preprocessor = load_object(r"D:\Nouveau dossier\TitreRNCP_Bloc1\projet_prevision_energies_bloc5\final_models\preprocessor.pkl")
+        #model = load_object(r"D:\Nouveau dossier\TitreRNCP_Bloc1\projet_prevision_energies_bloc5\final_models\model.pkl")
+        #preprocessor = load_object(r"D:\Nouveau dossier\TitreRNCP_Bloc1\projet_prevision_energies_bloc5\final_models\preprocessor.pkl")
         # Faire la prédiction avec la méthode predict_multistep
-        forecast_model = ForecastModel(preprocessor=preprocessor, model=model)
-        y_pred, y_test = forecast_model.predict_multistep(x=df_features, n_futur=horizon_hours)
+        #forecast_model = ForecastModel(preprocessor=preprocessor, model=model)
+        #y_pred, y_test = forecast_model.predict_multistep(x=df_features, n_futur=horizon_hours)
         
         print(f"Type y_pred: {type(y_pred)}, Shape: {y_pred.shape}")
         print(f"Type y_test: {type(y_test)}, Shape: {y_test.shape if y_test is not None else 'None'}")
