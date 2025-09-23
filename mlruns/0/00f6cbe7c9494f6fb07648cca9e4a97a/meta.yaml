@@ -1,0 +1,15 @@
+artifact_uri: file:///D:/Nouveau%20dossier/TitreRNCP_Bloc1/projet_prevision_energies_bloc5/mlruns/0/00f6cbe7c9494f6fb07648cca9e4a97a/artifacts
+end_time: 1758628980762
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 00f6cbe7c9494f6fb07648cca9e4a97a
+run_name: gifted-conch-43
+run_uuid: 00f6cbe7c9494f6fb07648cca9e4a97a
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1758628976617
+status: 3
+tags: []
+user_id: saida

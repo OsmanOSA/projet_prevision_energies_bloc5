@@ -1,0 +1,14 @@
+aliases: []
+creation_timestamp: 1758628306183
+current_stage: None
+description: null
+last_updated_timestamp: 1758628306183
+name: forecasting_model
+run_id: cf1ff4c9055744598aad76b01093d1ae
+run_link: null
+source: file:///D:/Nouveau%20dossier/TitreRNCP_Bloc1/projet_prevision_energies_bloc5/mlruns/0/cf1ff4c9055744598aad76b01093d1ae/artifacts/model
+status: READY
+status_message: null
+storage_location: file:///D:/Nouveau%20dossier/TitreRNCP_Bloc1/projet_prevision_energies_bloc5/mlruns/0/cf1ff4c9055744598aad76b01093d1ae/artifacts/model
+user_id: null
+version: 1

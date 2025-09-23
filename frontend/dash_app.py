@@ -1,13 +1,18 @@
-import dash
-from dash import dcc, html, Input, Output, dash_table
-import plotly.graph_objs as go
-import plotly.express as px
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
 import sys
 import os
 import math
+import pandas as pd
+import numpy as np
+import dash
+import plotly.graph_objs as go
+import plotly.express as px
+import pickle
+
+
+
+from datetime import datetime, timedelta
+from dash import dcc, html, Input, Output, dash_table
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from plotly.subplots import make_subplots
 from statsmodels.tsa.seasonal import seasonal_decompose
 from api_client import ForecastAPIClient
@@ -18,7 +23,7 @@ from pipeline_prevision.utils.main_utils.utils import concat_all_data, load_obje
 from pipeline_prevision.utils.ml_utils.model.estimator import ForecastModel
 from pipeline_prevision.utils.ml_utils.metric.forecasting_metric import get_forecast_score
 from pipeline_prevision.constant.training_pipeline import LOOKBACK, HORIZON
-import pickle
+
 
 # Initialiser l'application Dash avec support multi-pages
 # Configuration pour intégration avec FastAPI
@@ -143,13 +148,15 @@ def create_home_page():
             ], style={'backgroundColor': '#fff', 'padding': '25px', 'borderRadius': '10px',
                      'boxShadow': '0 4px 6px rgba(0,0,0,0.1)', 'flex': '1', 'marginRight': '15px'}),
             
-            # Colonne 2 - Comment utiliser
+            # Colonne 2 - Comment
             html.Div([
                 html.H4("Comment utiliser l'application", style={'color': '#2c3e50', 'marginBottom': '15px'}),
                 html.Ol([
                     html.Li("Configurez les dates dans le menu latéral", style={'marginBottom': '8px'}),
                     html.Li("Cliquez sur 'Charger' pour importer les données", style={'marginBottom': '8px'}),
                     html.Li(["Explorez la page ", html.Span("Vue d'ensemble", style={'color': '#27ae60', 'fontWeight': 'bold'}), " pour l'analyse globale"], style={'marginBottom': '8px'}),
+                    html.Li(["Explorez la page ", html.Span("Analyse Consommation", style={'color': '#27ae60', 'fontWeight': 'bold'}), " pour l'analyse de la consommation"], style={'marginBottom': '8px'}),
+                    html.Li(["Explorez la page ", html.Span("Analyse Production", style={'color': '#27ae60', 'fontWeight': 'bold'}), " pour l'analyse des différentes sources de production"], style={'marginBottom': '8px'}),
                     html.Li(["Utilisez la page ", html.Span("Prévision", style={'color': '#27ae60', 'fontWeight': 'bold'}), " pour générer des prédictions"], style={'marginBottom': '8px'})
                 ], style={'lineHeight': '1.6'})
             ], style={'backgroundColor': '#fff', 'padding': '25px', 'borderRadius': '10px',
@@ -340,7 +347,7 @@ def create_no_data_message():
                  'borderRadius': '10px', 'marginTop': '50px'})
     ])
 
-# Fonction utilitaire pour convertir les données
+# Fonction pour convertir les données
 def prepare_dataframe(stored_data):
     if not stored_data:
         return None
@@ -396,7 +403,7 @@ def create_predictions(df, horizon_hours):
         print(f"Shape des données: {df.shape}")
         
         # Utiliser exactement le même ordre de features que dans test.py
-        features = ['BIOMASS', 'NUCLEAR', 'SOLAR', 'WIND_ONSHORE', 'consommation_totale', 'temp']
+        features =['temp', 'SOLAR', 'BIOMASS', 'WIND_ONSHORE', 'NUCLEAR', 'consommation_totale']
         
         # Vérifier que toutes les features sont présentes
         missing_features = [f for f in features if f not in df.columns]
@@ -404,16 +411,22 @@ def create_predictions(df, horizon_hours):
             return None, None, None, None, f"Features manquantes: {missing_features}"
         
         # Prendre les 36 dernières valeurs et réorganiser les colonnes dans le bon ordre
+        
+        # Mettre une condition pour passer d'une prévision de teste à une prévision réelle
+        
         df_features = df[features].tail(36).copy()
         print(f"Shape des 36 dernières valeurs: {df_features.shape}")
         print(f"Données avec features ordonnées: {df_features.columns.tolist()}")
         
         # Créer le ForecastModel comme dans test.py
-        api_client = ForecastAPIClient()
-        y_pred, y_test, mae, mse = api_client.predict_multistep(df_features, horizon_hours)
+        #api_client = ForecastAPIClient()
+        #y_pred, y_test, mae, mse = api_client.predict_multistep(df_features, horizon_hours)
         
+        model = load_object(r"D:\Nouveau dossier\TitreRNCP_Bloc1\projet_prevision_energies_bloc5\final_models\model.pkl")
+        preprocessor = load_object(r"D:\Nouveau dossier\TitreRNCP_Bloc1\projet_prevision_energies_bloc5\final_models\preprocessor.pkl")
         # Faire la prédiction avec la méthode predict_multistep
-        #y_pred, y_test = forecast_model.predict_multistep(x=df_features, n_futur=horizon_hours)
+        forecast_model = ForecastModel(preprocessor=preprocessor, model=model)
+        y_pred, y_test = forecast_model.predict_multistep(x=df_features, n_futur=horizon_hours)
         
         print(f"Type y_pred: {type(y_pred)}, Shape: {y_pred.shape}")
         print(f"Type y_test: {type(y_test)}, Shape: {y_test.shape if y_test is not None else 'None'}")
@@ -457,10 +470,10 @@ def calculate_energy_deficit_predict(y_pred):
         deficit = np.zeros((y_pred.shape[0], 1))
         
         for i in range(len(y_pred)):
-            # Production totale = somme des 4 premières colonnes (BIOMASS, NUCLEAR, SOLAR, WIND_ONSHORE)
-            production_total = y_pred[i, :4].sum()
+            # Production totale = somme de 1 à 5 colonnes (BIOMASS, NUCLEAR, SOLAR, WIND_ONSHORE)
+            production_total = y_pred[i, 1:5].sum()
             # Consommation = 5ème colonne (index 4)
-            consumption = y_pred[i, 4]
+            consumption = y_pred[i, -1]
             # Déficit = Production - Consommation
             # Positif = Surplus (on produit plus qu'on consomme)
             # Négatif = Déficit (on produit moins qu'on consomme)
@@ -470,7 +483,7 @@ def calculate_energy_deficit_predict(y_pred):
         deficit_flat = deficit.flatten()
         
         # Analyser les patterns de répétition
-        production_totals = [y_pred[i, :4].sum() for i in range(len(y_pred))]
+        production_totals = [y_pred[i, 1:5].sum() for i in range(len(y_pred))]
         
         # Détecter les valeurs répétées
         unique_productions = []
@@ -497,10 +510,10 @@ def calculate_energy_deficit_predict(y_pred):
         print(f"Déficit - Min: {deficit_flat.min():.2f}, Max: {deficit_flat.max():.2f}, Moyenne: {deficit_flat.mean():.2f}")
         
         return {
-            'consumption': y_pred[:, 4],  # Consommation
-            'production': np.array([y_pred[i, :4].sum() for i in range(len(y_pred))]),  # Production totale
+            'consumption': y_pred[:, 5],  # Consommation
+            'production': np.array([y_pred[i,1:5].sum() for i in range(len(y_pred))]),  # Production totale
             'deficit': deficit_flat,  # Déficit = Production - Consommation (positif = surplus, négatif = manque)
-            'deficit_percentage': (deficit_flat / np.maximum(y_pred[:, 4], 1e-8)) * 100
+            'deficit_percentage': (deficit_flat / np.maximum(y_pred[:, -1], 1e-8)) * 100
         }
         
     except Exception as e:
@@ -510,7 +523,6 @@ def calculate_energy_deficit_predict(y_pred):
 def calculate_metrics_by_energy(y_test, y_pred, features):
     """Calculer les métriques par source d'énergie"""
     try:
-        from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
         
         metrics_energies = []
         
@@ -537,9 +549,6 @@ def calculate_metrics_by_energy(y_test, y_pred, features):
 
 def create_prediction_charts(hist_data, pred_df, features, horizon):
     """Créer des graphiques complètement séparés par source avec intervalles de confiance"""
-    from plotly.subplots import make_subplots
-    import numpy as np
-    
     # Couleurs pour chaque variable
     colors = {
         'consommation_totale': '#e74c3c',
@@ -554,12 +563,12 @@ def create_prediction_charts(hist_data, pred_df, features, horizon):
     fig = make_subplots(
         rows=3, cols=2,
         subplot_titles=(
-            'BIOMASS (Biomasse)',
-            'NUCLEAR (Nucléaire)',
+            'temp (Température)',
             'SOLAR (Solaire)',
+            'BIOMASS (Biomasse)',
             'WIND_ONSHORE (Éolien)',
+            'NUCLEAR (Nucléaire)',
             'Consommation Totale',
-            'Température'
         ),
         vertical_spacing=0.15,
         horizontal_spacing=0.12,
@@ -581,12 +590,12 @@ def create_prediction_charts(hist_data, pred_df, features, horizon):
     
     # Mapping des sources aux positions dans la grille
     source_positions = {
-        'BIOMASS': (1, 1),
-        'NUCLEAR': (1, 2),
-        'SOLAR': (2, 1),
+        'temp': (1, 1),
+        'SOLAR': (1, 2),
+        'BIOMASS': (2, 1),
         'WIND_ONSHORE': (2, 2),
-        'consommation_totale': (3, 1),
-        'temp': (3, 2)
+        'NUCLEAR': (3, 1),
+        'consommation_totale': (3, 2)
     }
     
     # Tracer chaque source séparément avec intervalles de confiance
@@ -609,12 +618,10 @@ def create_prediction_charts(hist_data, pred_df, features, horizon):
                 row=row, col=col
             )
             
-            # Calculer l'intervalle de confiance plus réaliste
-            # Utiliser un pourcentage de la valeur prédite qui augmente avec l'horizon
-            # Commence à ±2% et augmente jusqu'à ±10% sur 24h
+            # Calculer l'intervalle de confiance
+            
             pred_values = pred_df[source].values
             
-            # Pourcentage d'incertitude qui augmente linéairement avec l'horizon
             # Ajusté selon le type de source pour plus de réalisme
             if source == 'NUCLEAR':
                 base_uncertainty = 0.01  # 1% - Nucléaire très stable
@@ -754,7 +761,7 @@ def create_consumption_vs_production_chart(deficit_info, timestamps, hist_data=N
     # Si on a des données historiques, les ajouter d'abord
     if hist_data is not None:
         # Calculer la production totale historique
-        production_sources = ['BIOMASS', 'NUCLEAR', 'SOLAR', 'WIND_ONSHORE']
+        production_sources = ['SOLAR', 'BIOMASS', 'WIND_ONSHORE', 'NUCLEAR']
         hist_production = hist_data[production_sources].sum(axis=1) if all(s in hist_data.columns for s in production_sources) else None
         
         # Historique de consommation
@@ -849,17 +856,16 @@ def create_consumption_vs_production_chart(deficit_info, timestamps, hist_data=N
     return fig
 
 def create_deficit_evolution_chart(deficit_info, timestamps, hist_data=None):
-    """Créer le graphique d'évolution du déficit avec historique"""
+    """Créer le graphique d'évolution du déficit avec historique (en GW)"""
     fig = go.Figure()
     
     # Si on a des données historiques, calculer et afficher le déficit historique
     if hist_data is not None:
-        production_sources = ['BIOMASS', 'NUCLEAR', 'SOLAR', 'WIND_ONSHORE']
+        production_sources = ['SOLAR', 'BIOMASS', 'WIND_ONSHORE', 'NUCLEAR']
         if all(s in hist_data.columns for s in production_sources) and 'consommation_totale' in hist_data.columns:
             hist_production = hist_data[production_sources].sum(axis=1)
-            hist_deficit = hist_production - hist_data['consommation_totale']
+            hist_deficit = (hist_production - hist_data['consommation_totale']) / 1000.0  # ✅ conversion en GW
             
-            # Historique du déficit
             fig.add_trace(go.Scatter(
                 x=hist_data.index,
                 y=hist_deficit,
@@ -869,19 +875,14 @@ def create_deficit_evolution_chart(deficit_info, timestamps, hist_data=None):
                 opacity=0.6,
                 fill='tozeroy',
                 fillcolor='rgba(149, 165, 166, 0.1)',
-                hovertemplate='Déficit hist: %{y:.1f} MW<extra></extra>'
+                hovertemplate='Déficit hist: %{y:.2f} GW<extra></extra>'
             ))
     
-    # Déficit prédit avec zone colorée
-    deficit_values = deficit_info['deficit']
+    # Déficit prédit
+    deficit_values = np.array(deficit_info['deficit']) / 1_000  # ✅ conversion en GW
     
-    # Créer des couleurs pour chaque point selon sa valeur
-    colors = []
-    for val in deficit_values:
-        if val > 0:  # Surplus (positif) = vert
-            colors.append('#27ae60')
-        else:  # Déficit (négatif) = rouge
-            colors.append('#e74c3c')
+    # Couleurs selon signe
+    colors = ['#27ae60' if val > 0 else '#e74c3c' for val in deficit_values]
     
     fig.add_trace(go.Scatter(
         x=timestamps,
@@ -889,14 +890,10 @@ def create_deficit_evolution_chart(deficit_info, timestamps, hist_data=None):
         mode='lines+markers',
         name='Déficit (prédiction)',
         line=dict(color='#f39c12', width=3, dash='dash'),
-        marker=dict(
-            size=8,
-            color=colors,  # Utiliser les couleurs correctes
-            line=dict(width=1, color='white')
-        ),
+        marker=dict(size=8, color=colors, line=dict(width=1, color='white')),
         fill='tozeroy',
         fillcolor='rgba(243, 156, 18, 0.2)',
-        hovertemplate='Déficit préd: %{y:.1f} MW<extra></extra>'
+        hovertemplate='Déficit préd: %{y:.2f} GW<extra></extra>'
     ))
     
     # Ligne de séparation historique/prédiction
@@ -910,7 +907,7 @@ def create_deficit_evolution_chart(deficit_info, timestamps, hist_data=None):
                 line_width=1,
                 annotation_text="Début prédictions"
             )
-        except:
+        except Exception:
             pass
     
     # Ligne d'équilibre
@@ -923,42 +920,30 @@ def create_deficit_evolution_chart(deficit_info, timestamps, hist_data=None):
     )
     
     # Zones colorées pour surplus/déficit
-    # Calculer y_max en tenant compte de l'historique aussi
     all_deficit_values = [deficit_values]
-    
-    # Ajouter les valeurs historiques si elles existent
     if hist_data is not None:
-        production_sources = ['BIOMASS', 'NUCLEAR', 'SOLAR', 'WIND_ONSHORE']
+        production_sources = ['SOLAR', 'BIOMASS', 'WIND_ONSHORE', 'NUCLEAR']
         if all(s in hist_data.columns for s in production_sources) and 'consommation_totale' in hist_data.columns:
             hist_production = hist_data[production_sources].sum(axis=1)
-            hist_deficit = hist_production - hist_data['consommation_totale']
+            hist_deficit = (hist_production - hist_data['consommation_totale']) / 1000.0
             all_deficit_values.append(hist_deficit.values)
     
-    # Calculer le max pour l'échelle Y
     all_values_concat = np.concatenate(all_deficit_values)
     y_max = max(abs(all_values_concat.min()), abs(all_values_concat.max())) * 1.1
     
-    fig.add_hrect(
-        y0=0, y1=y_max,
-        fillcolor="green", opacity=0.05,
-        layer="below", line_width=0,
-    )
-    
-    fig.add_hrect(
-        y0=-y_max, y1=0,
-        fillcolor="red", opacity=0.05,
-        layer="below", line_width=0,
-    )
+    fig.add_hrect(y0=0, y1=y_max, fillcolor="green", opacity=0.05, layer="below", line_width=0)
+    fig.add_hrect(y0=-y_max, y1=0, fillcolor="red", opacity=0.05, layer="below", line_width=0)
     
     fig.update_layout(
         title='Évolution du Déficit',
         title_font_size=14,
         xaxis_title='',
-        yaxis_title='Déficit (MW)',
+        yaxis_title='Déficit (GW)',  # ✅ affichage en GW
         height=350,
         hovermode='x unified',
         showlegend=False,
-        margin=dict(l=60, r=20, t=60, b=40)
+        margin=dict(l=60, r=20, t=60, b=40),
+        yaxis=dict(tickformat=".0f")  # ✅ plus de "k", ticks en décimal
     )
     
     return fig
@@ -1813,7 +1798,7 @@ def create_deficit_evolution(deficit_data):
         
         fig.add_trace(go.Bar(
             x=df_daily.index,
-            y=df_daily['deficit'],
+            y=df_daily['deficit'] / 10e3,
             name='Déficit Énergétique',
             marker=dict(
                 color=colors,
@@ -1832,9 +1817,10 @@ def create_deficit_evolution(deficit_data):
             title='Évolution du Déficit Énergétique (Prod - Conso)',
             title_font_size=16,
             xaxis_title='Date',
-            yaxis_title='Déficit (MW)',
+            yaxis_title='Déficit (GW)',
             height=400,
             showlegend=False,
+            yaxis = dict(tickformat='0.2f'),
             annotations=[
                 dict(x=0.02, y=0.98, xref="paper", yref="paper",
 
@@ -1919,6 +1905,9 @@ def create_consumption_vs_production(df):
 def create_distributions_overview(df):
     """Créer des distributions des variables principales"""
     try:
+        
+        df = df.drop(columns=["index"], axis=1)
+        
         # Variables principales à analyser (inclure toujours SOLAR)
         main_vars = ['consommation_totale']
         production_cols = [col for col in df.columns if col in ['SOLAR', 'BIOMASS', 'WIND_ONSHORE', 'NUCLEAR']]
@@ -2044,7 +2033,7 @@ def create_prediction_visualizations(historical_df, y_pred, y_test, mae, mse, me
         has_ground_truth = y_test is not None and mae is not None
         
         # Features utilisées
-        features = ['BIOMASS', 'NUCLEAR', 'SOLAR', 'WIND_ONSHORE', 'consommation_totale', 'temp']
+        features = ['temp', 'SOLAR', 'BIOMASS', 'WIND_ONSHORE', 'NUCLEAR', 'consommation_totale']
         
         print(f"Mode: {'Test/Validation' if has_ground_truth else 'Prédiction Réelle'}")
         print(f"Shape de y_pred: {y_pred.shape}")

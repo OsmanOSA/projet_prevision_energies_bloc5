@@ -40,7 +40,9 @@ class ModelTrainer:
             raise ForecastingException(e, sys)
         
     def track_mlflow(self, best_model, 
-                     forecastmetric):
+                     forecastmetric, X, y_pred):
+        
+        model_name = "forecasting_model"
         
         with mlflow.start_run():
             mae = forecastmetric.mae
@@ -48,10 +50,41 @@ class ModelTrainer:
 
             mlflow.log_metric("MAE", mae)
             mlflow.log_metric("MSE", mse)
-            mlflow.sklearn.log_model(best_model,"model")
-        
+            
+            # Sauvegarde du modèle
+            
+            mlflow.sklearn.log_model(
+                best_model,
+                "model",
+                registered_model_name=model_name,
+                signature=mlflow.models.infer_signature(X, y_pred),
+                input_example=X[:5])
+            
+           # Client MLflow
+            client = mlflow.tracking.MlflowClient()
+            
+            # Vérifier la dernière version en Production
+            production_versions = client.get_latest_versions(model_name, stages=["Production"])
+            if production_versions:
+                prod_run_id = production_versions[0].run_id
+                prod_run = mlflow.get_run(prod_run_id)
+                prod_mae = prod_run.data.metrics.get("MAE", float("inf"))
+            else:
+                prod_mae = float("inf")  
+            
+            if mae < prod_mae:
+                model_version = client.get_latest_versions(model_name, stages=["None"])[0].version
+                client.transition_model_version_stage(
+                    name=model_name,
+                    version=model_version,
+                    stage="Production"
+                )
+                print(f"Modèle {model_name} v{model_version} promu en Production (MAE: {mae} < MAE prod: {prod_mae})")
+                return model_version
+            else:
+                print(f"Modèle non promu (MAE: {mae} >= MAE prod: {prod_mae})")
+                return None
 
-    
     def train_model(self, X_train, y_train, X_valid, y_valid):
 
         models = {
@@ -91,14 +124,16 @@ class ModelTrainer:
 
         ## Track the experiements with mlflow
         self.track_mlflow(best_model=best_model, 
-                          forecastmetric=forecast_train_metric)
+                          forecastmetric=forecast_train_metric, 
+                          X=X_train, y_pred=y_train_pred)
 
         y_valid_pred = best_model.predict(X_valid)
         forecast_valid_metric = get_forecast_score(y_true = y_valid, y_pred = y_valid_pred)
 
         ## Track the experiements with mlflow
         self.track_mlflow(best_model=best_model, 
-                          forecastmetric=forecast_valid_metric)
+                          forecastmetric=forecast_valid_metric, X=X_valid, 
+                          y_pred=y_valid_pred)
 
         preprocessor = load_object(file_path=self.data_transformation_artifact.transformed_object_file_path)
             

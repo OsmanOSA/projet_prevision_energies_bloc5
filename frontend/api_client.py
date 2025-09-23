@@ -19,7 +19,7 @@ class ForecastAPIClient:
        
         try:
             # Préparer les données pour l'API
-            features = ['BIOMASS', 'NUCLEAR', 'SOLAR', 'WIND_ONSHORE', 'consommation_totale', 'temp']
+            features = ['temp', 'SOLAR', 'BIOMASS', 'WIND_ONSHORE', 'NUCLEAR','consommation_totale']
             
             # Vérifier que toutes les features sont présentes
             missing_features = [f for f in features if f not in data.columns]
