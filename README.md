@@ -26,7 +26,7 @@ structure_projet/
 │   └── workflows/
 ├── data_schema/
 ├── frontend/
-├── @images/
+├── images/
 ├── notebooks/
 ├── pipeline_prevision/
 │   ├── cloud/
