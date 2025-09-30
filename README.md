@@ -93,5 +93,5 @@ python main.py   # Lancer le pipeline d'entrainement
 # 1. Construire l'image Docker
 docker build -t prevision-energies .
 # 2. Lancer l'image
-docker run -p 8000:8000 
+docker run -p 8000:8000 prevision-energies
 ```
