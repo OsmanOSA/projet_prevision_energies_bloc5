@@ -14,6 +14,10 @@ Elle permet d'estimer, à différents horizons de prévision, la puissance fourn
 
 Conçue avec Dash, elle s'appuie sur l'API de RTE et intègre un pipeline ETL complet pour collecter, transformer et exploiter les données en temps réel.
 
+## Architecture du projet
+
+![Architecture du projet](images/architecture.svg)
+
 ## Structure du projet
 
 ```
@@ -22,6 +26,7 @@ structure_projet/
 │   └── workflows/
 ├── data_schema/
 ├── frontend/
+├── @images/
 ├── notebooks/
 ├── pipeline_prevision/
 │   ├── cloud/
