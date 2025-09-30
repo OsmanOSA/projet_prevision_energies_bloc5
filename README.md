@@ -10,6 +10,6 @@
 # Prévisions énérgétiques (Productions et Consommation)
 
 Ce projet est une application de prédiction et d'analyse des productions et de la consommation énergétique en France.
-Elle permet d'estimer, à différents horizons de temps, la puissance fournie par diverses sources d'énergie ainsi que la demande nationale.
+Elle permet d'estimer, à différents horizons de prévision, la puissance fournie par diverses sources d'énergie ainsi que la demande nationale.
 
 Conçue avec Dash, elle s'appuie sur l'API de RTE et intègre un pipeline ETL complet pour collecter, transformer et exploiter les données en temps réel.
