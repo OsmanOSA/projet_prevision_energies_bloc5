@@ -20,7 +20,7 @@ Conçue avec Dash, elle s'appuie sur l'API de RTE et intègre un pipeline ETL co
 
 
 ### Structure du bloc data ingestion
-![Bloc data ingestion](images/Structure_data_ingestion.svg)
+
 
 
 ## Structure du projet
