@@ -12,6 +12,7 @@ on:
       - 'github/workflows/deploy-dashboard.yml'
       - 'heroku.yml'
       - '.dockerignore'
+      - 'images/**'
       - 'notebook/**'
 
 jobs:
