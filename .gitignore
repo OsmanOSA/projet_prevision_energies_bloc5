@@ -5,3 +5,4 @@ __pycache__
 logs
 catboost_info
 logs.log
+notebooks/
