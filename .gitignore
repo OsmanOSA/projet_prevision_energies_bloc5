@@ -6,3 +6,5 @@ logs
 catboost_info
 logs.log
 notebooks/
+final_models/*
+*.pkl
