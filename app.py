@@ -52,16 +52,23 @@ class PredictionMultiStep(BaseModel):
 
 # Lazy loading du modèle
 def get_forecast_model():
-    if "forecast_model" not in model_cache:
-        print("Loading forecast model...")
-        preprocessor_path = os.path.join(MODEL_DIR, "preprocessor.pkl")
-        model_path = os.path.join(MODEL_DIR, "model.pkl")
-        preprocessor = load_object(preprocessor_path)
-        final_model = load_object(model_path)
-        print("Model loaded.")
-        model_cache["forecast_model"] = ForecastModel(preprocessor=preprocessor, model=final_model)
-        print("Forecast model loaded.")
-    return model_cache["forecast_model"]
+
+    try :
+        if "forecast_model" not in model_cache:
+            print("Loading forecast model...")
+            preprocessor_path = os.path.join(MODEL_DIR, "preprocessor.pkl")
+            model_path = os.path.join(MODEL_DIR, "model.pkl")
+            preprocessor = load_object(preprocessor_path)
+            final_model = load_object(model_path)
+            print("Model loaded.")
+            model_cache["forecast_model"] = ForecastModel(preprocessor=preprocessor, model=final_model)
+            print("Forecast model loaded.")
+        return model_cache["forecast_model"]
+    
+    except Exception as e:
+        print("📂 Files in current directory:", os.listdir())
+        print("📂 Files in models directory:", os.listdir("models"))
+        raise ForecastingException(e, sys)
 
 # Monter l'application Dash sur /dashboard
 app.mount("/dashboard", WSGIMiddleware(dash_app.server))
