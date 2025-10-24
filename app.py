@@ -67,7 +67,6 @@ def get_forecast_model():
         return model_cache["forecast_model"]
     
     except Exception as e:
-        
         print("📂 Files in models directory:", os.listdir("final_models"))
         raise ForecastingException(e, sys)
 
