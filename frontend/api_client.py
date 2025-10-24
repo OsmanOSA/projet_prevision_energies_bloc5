@@ -14,12 +14,18 @@ class ForecastAPIClient:
     def __init__(self):
         # URL de l'API FastAPI déployée
         self.api_url = "https://energiesforecasts-7f55a2300a2c.herokuapp.com"
+        #self.api_url = "http://127.0.0.1:8000"
         
-    def predict_multistep(self, data: pd.DataFrame, n_future: int):
+    def predict_multistep(self,
+                           data: pd.DataFrame,
+                           n_future: int):
        
         try:
+
             # Préparer les données pour l'API
-            features = ['temp', 'SOLAR', 'BIOMASS', 'WIND_ONSHORE', 'NUCLEAR','consommation_totale']
+            features = ['temp', 'SOLAR', 'BIOMASS', 
+                        'WIND_ONSHORE', 'NUCLEAR',
+                        'consommation_totale']
             
             # Vérifier que toutes les features sont présentes
             missing_features = [f for f in features if f not in data.columns]
@@ -44,8 +50,7 @@ class ForecastAPIClient:
             response = requests.post(
                 f"{self.api_url}/predict_multistep",
                 json=payload,
-                timeout=60
-            )
+                timeout=60)
             
             if response.status_code == 200:
                 result = response.json()

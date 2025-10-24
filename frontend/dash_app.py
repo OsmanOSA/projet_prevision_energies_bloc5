@@ -395,42 +395,24 @@ def get_cached_content(page_name, stored_data, create_function):
 
 # Fonctions pour les prévisions avec modèles pré-entraînés
 
-def create_predictions(df, horizon_hours):
+def create_predictions(df: pd.DataFrame, 
+                       horizon_hours: int):
     """Créer des prévisions en utilisant les modèles pré-entraînés (inspiré de test.py)"""
     try:
+
+        features = ['temp', 'SOLAR', 'BIOMASS', 
+                        'WIND_ONSHORE', 'NUCLEAR',
+                        'consommation_totale']
         
         print(f"Colonnes disponibles dans df: {df.columns.tolist()}")
         print(f"Shape des données: {df.shape}")
         
-        # Utiliser exactement le même ordre de features que dans test.py
-        features =['temp', 'SOLAR', 'BIOMASS', 'WIND_ONSHORE', 'NUCLEAR', 'consommation_totale']
-        
-        # Vérifier que toutes les features sont présentes
-        missing_features = [f for f in features if f not in df.columns]
-        if missing_features:
-            return None, None, None, None, f"Features manquantes: {missing_features}"
-        
-        # Prendre les 36 dernières valeurs et réorganiser les colonnes dans le bon ordre
-        
-        # Mettre une condition pour passer d'une prévision de teste à une prévision réelle
-        
-        df_features = df[features].tail(36).copy()
-        print(f"Shape des 36 dernières valeurs: {df_features.shape}")
-        print(f"Données avec features ordonnées: {df_features.columns.tolist()}")
-        
         # Créer le ForecastModel comme dans test.py
         api_client = ForecastAPIClient()
-        y_pred, y_test, mae, mse = api_client.predict_multistep(df_features, horizon_hours)
-        
-        #model = load_object(r"D:\Nouveau dossier\TitreRNCP_Bloc1\projet_prevision_energies_bloc5\final_models\model.pkl")
-        #preprocessor = load_object(r"D:\Nouveau dossier\TitreRNCP_Bloc1\projet_prevision_energies_bloc5\final_models\preprocessor.pkl")
-        # Faire la prédiction avec la méthode predict_multistep
-        #forecast_model = ForecastModel(preprocessor=preprocessor, model=model)
-        #y_pred, y_test = forecast_model.predict_multistep(x=df_features, n_futur=horizon_hours)
+        y_pred, y_test, mae, mse = api_client.predict_multistep(df, horizon_hours)
         
         print(f"Type y_pred: {type(y_pred)}, Shape: {y_pred.shape}")
         print(f"Type y_test: {type(y_test)}, Shape: {y_test.shape if y_test is not None else 'None'}")
-        
         
         # Calculer les métriques seulement si on a y_test (mode test/validation)
         mae, mse, metrics_by_energy = None, None, None
