@@ -412,7 +412,7 @@ def create_predictions(df: pd.DataFrame,
         y_pred, y_test, mae, mse = api_client.predict_multistep(df, horizon_hours)
         
         print(f"Type y_pred: {type(y_pred)}, Shape: {y_pred.shape}")
-        print(f"Type y_test: {type(y_test)}, Shape: {y_test.shape if y_test is not None else 'None'}")
+        #print(f"Type y_test: {type(y_test)}, Shape: {y_test.shape if y_test is not None else 'None'}")
         
         # Calculer les métriques seulement si on a y_test (mode test/validation)
         mae, mse, metrics_by_energy = None, None, None
