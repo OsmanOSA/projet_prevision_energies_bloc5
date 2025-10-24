@@ -28,6 +28,10 @@ os.environ["GIT_PYTHON_REFRESH"] = "quiet"
 sys.path.append(os.path.join(os.path.dirname(__file__), 'frontend'))
 from dash_app import app as dash_app
 
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_DIR = os.path.join(BASE_DIR, "final_models")
+
 # FastAPI app
 app = FastAPI(title="Energy Forecasting API + Dashboard", version="1.0.0")
 origins = ["*"]
@@ -50,9 +54,11 @@ class PredictionMultiStep(BaseModel):
 def get_forecast_model():
     if "forecast_model" not in model_cache:
         print("Loading forecast model...")
-        preprocessor = load_object("final_models/preprocessor.pkl")
-        final_model = load_object("final_models/model.pkl")
-        print("Model loaded from mlflow.")
+        preprocessor_path = os.path.join(MODEL_DIR, "preprocessor.pkl")
+        model_path = os.path.join(MODEL_DIR, "model.pkl")
+        preprocessor = load_object(preprocessor_path)
+        final_model = load_object(model_path)
+        print("Model loaded.")
         model_cache["forecast_model"] = ForecastModel(preprocessor=preprocessor, model=final_model)
         print("Forecast model loaded.")
     return model_cache["forecast_model"]
