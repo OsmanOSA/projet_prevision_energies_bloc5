@@ -107,7 +107,7 @@ def load_object(file_path: str) -> object:
             return pickle.load(file_obj)
 
     except Exception as e:
-        raise ForecastingException(sys, e) 
+        raise ForecastingException(e, sys) 
     
 def load_numpy_array_data(file_path: str):
 
