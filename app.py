@@ -60,6 +60,7 @@ def get_forecast_model():
             model_path = os.path.join(MODEL_DIR, "model.pkl")
             preprocessor = load_object(preprocessor_path)
             final_model = load_object(model_path)
+            print("Pickle chargé avec succès :", type(final_model))
             print("Model loaded.")
             model_cache["forecast_model"] = ForecastModel(preprocessor=preprocessor, model=final_model)
             print("Forecast model loaded.")
