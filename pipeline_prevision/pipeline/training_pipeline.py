@@ -25,14 +25,14 @@ from pipeline_prevision.entity.artifact_entity import (
 )
 
 from pipeline_prevision.constant.training_pipeline import TRAINING_BUCKET_NAME
-from pipeline_prevision.cloud.s3_syncer import S3Sync
+#from pipeline_prevision.cloud.s3_syncer import S3Sync
 
 
 class TrainingPipeline:
     
     def __init__(self):
         self.training_pipeline_config=TrainingPipelineConfig()
-        self.s3_sync = S3Sync()
+        #self.s3_sync = S3Sync()
 
     def start_data_ingestion(self):
 
@@ -113,9 +113,9 @@ class TrainingPipeline:
     def sync_artifact_dir_to_s3(self):
 
         try:
-            aws_bucket_url = aws_bucket_url = f"s3://{TRAINING_BUCKET_NAME}/artifact/{self.training_pipeline_config.timestamp}"
-            self.s3_sync.sync_folder_to_s3(folder = self.training_pipeline_config.artifact_dir,aws_bucket_url=aws_bucket_url)
-            
+            # aws_bucket_url = aws_bucket_url = f"s3://{TRAINING_BUCKET_NAME}/artifact/{self.training_pipeline_config.timestamp}"
+            # self.s3_sync.sync_folder_to_s3(folder = self.training_pipeline_config.artifact_dir,aws_bucket_url=aws_bucket_url)
+            pass
         except Exception as e:
             raise ForecastingException(e, sys)
     

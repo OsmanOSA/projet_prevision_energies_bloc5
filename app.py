@@ -68,7 +68,7 @@ def get_forecast_model():
     
     except Exception as e:
 
-        print("📂 Files in models directory:", os.listdir("final_models"))
+        print("Files in models directory:", os.listdir("final_models"))
         raise ForecastingException(e, sys)
 
 # Monter l'application Dash sur /dashboard

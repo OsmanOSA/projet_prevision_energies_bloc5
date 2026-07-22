@@ -1,37 +1,108 @@
 import sys
 import os
-import math
 import pandas as pd
 import numpy as np
 import dash
 import plotly.graph_objs as go
 import plotly.express as px
-import pickle
-
-
 
 from datetime import datetime, timedelta
 from dash import dcc, html, Input, Output, dash_table
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from plotly.subplots import make_subplots
-from statsmodels.tsa.seasonal import seasonal_decompose
 from api_client import ForecastAPIClient
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pipeline_prevision.utils.main_utils.utils import concat_all_data, load_object
-from pipeline_prevision.utils.ml_utils.model.estimator import ForecastModel
+from pipeline_prevision.utils.main_utils.utils import concat_all_data
 from pipeline_prevision.utils.ml_utils.metric.forecasting_metric import get_forecast_score
-from pipeline_prevision.constant.training_pipeline import LOOKBACK, HORIZON
 
 
 # Initialiser l'application Dash avec support multi-pages
 # Configuration pour intégration avec FastAPI
-app = dash.Dash(__name__, 
+# FontAwesome pour les icônes de navigation (fas fa-*)
+external_stylesheets = [
+    "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css",
+]
+
+app = dash.Dash(__name__,
                 suppress_callback_exceptions=True,
+                external_stylesheets=external_stylesheets,
                 requests_pathname_prefix="/dashboard/")
 
-# Styles CSS 
+# ---------------------------------------------------------------------------
+# Constantes partagées (couleurs + styles réutilisés dans tout le dashboard)
+# ---------------------------------------------------------------------------
+
+# Palette des sources de production, utilisée par tous les graphiques
+ENERGY_COLORS = {
+    'SOLAR': '#f1c40f',
+    'BIOMASS': '#27ae60',
+    'WIND_ONSHORE': '#3498db',
+    'NUCLEAR': '#e74c3c',
+}
+
+# Sources de production considérées comme "production totale"
+PRODUCTION_SOURCES = ['SOLAR', 'BIOMASS', 'WIND_ONSHORE', 'NUCLEAR']
+
+# Ombre et carte blanche standard (évite de redéfinir le style à chaque bloc)
+CARD_SHADOW = '0 4px 6px rgba(0,0,0,0.1)'
+
+# Style des champs date natifs (sidebar).
+# color/backgroundColor sont explicites : la sidebar impose color:white, or le champ
+# date natif hérite de cette couleur -> texte blanc sur fond blanc (invisible) sans ça.
+DATE_INPUT_STYLE = {
+    'width': '100%',
+    'padding': '6px 8px',
+    'fontSize': '13px',
+    'color': '#2c3e50',
+    'backgroundColor': 'white',
+    'border': '1px solid #ccc',
+    'borderRadius': '4px',
+    'boxSizing': 'border-box',
+}
+
+
+def card(children, extra_style=None):
+    """Enrobe un contenu dans une carte blanche standard.
+
+    extra_style permet d'ajuster ponctuellement (flex, marges, padding...).
+    """
+    style = {
+        'backgroundColor': '#fff',
+        'padding': '20px',
+        'borderRadius': '12px',
+        'boxShadow': CARD_SHADOW,
+    }
+    if extra_style:
+        style.update(extra_style)
+    return html.Div(children, style=style)
+
+
+def metric_card(value, label, color):
+    """Tuile de métrique (grand chiffre + libellé) utilisée sur la vue d'ensemble."""
+    return card(
+        [
+            html.H2(value, style={'color': color, 'margin': '0'}),
+            html.P(label, style={'margin': '10px 0', 'fontSize': '16px'}),
+        ],
+        {'padding': '25px', 'textAlign': 'center', 'flex': '1'},
+    )
+
+
+def prediction_placeholder():
+    """Carte d'attente affichée avant qu'une prévision ne soit générée."""
+    return card(
+        [
+            html.H4("Prévisions Énergétiques", style={'color': '#2c3e50', 'marginBottom': '20px'}),
+            html.P("Configurez les paramètres ci-dessus et cliquez sur 'Générer Prévision' pour voir les résultats.",
+                   style={'textAlign': 'center', 'color': '#7f8c8d', 'fontSize': '16px', 'padding': '40px'}),
+        ],
+        {'padding': '25px', 'borderRadius': '10px'},
+    )
+
+
+# Styles CSS
 
 SIDEBAR_STYLE = {
     "position": "fixed",
@@ -73,21 +144,21 @@ sidebar = html.Div([
         
         html.Div([
             html.Label("Début:", style={'color': 'white', 'fontSize': '13px', 'marginBottom': '2px'}),
-            dcc.DatePickerSingle(
+            dcc.Input(
                 id='start-date-picker',
-                date='2024-01-01',
-                display_format='YYYY-MM-DD',
-                style={'width': '100%', 'fontSize': '11px'}
+                type='date',
+                value='2024-01-01',
+                style=DATE_INPUT_STYLE,
             )
         ], style={'marginBottom': '6px'}),
-        
+
         html.Div([
             html.Label("Fin:", style={'color': 'white', 'fontSize': '13px', 'marginBottom': '2px'}),
-            dcc.DatePickerSingle(
+            dcc.Input(
                 id='end-date-picker',
-                date='2024-01-07',
-                display_format='YYYY-MM-DD',
-                style={'width': '100%', 'fontSize': '11px'}
+                type='date',
+                value='2024-01-07',
+                style=DATE_INPUT_STYLE,
             )
         ], style={'marginBottom': '8px'}),
         
@@ -124,18 +195,17 @@ def create_home_page():
                 style={'textAlign': 'center', 'color': '#34495e', 'marginBottom': '30px', 'fontWeight': '300'}),
         
         # Carte d'introduction
-        html.Div([
-            html.P("Un outil dédié à la prévision de différentes sources d'énergie et la consommation énergétique", 
+        card([
+            html.P("Un outil dédié à la prévision de différentes sources d'énergie et la consommation énergétique",
                    style={'fontSize': '18px', 'fontStyle': 'italic', 'color': '#7f8c8d', 'marginBottom': '15px', 'textAlign': 'center'}),
-            html.P("Développé par : Osman SAID ALI", 
+            html.P("Développé par : Osman SAID ALI",
                    style={'fontSize': '16px', 'fontWeight': 'bold', 'color': '#2c3e50', 'textAlign': 'center'})
-        ], style={'backgroundColor': '#fff', 'padding': '25px', 'borderRadius': '10px',
-                 'boxShadow': '0 4px 6px rgba(0,0,0,0.1)', 'marginBottom': '30px'}),
-        
+        ], {'padding': '25px', 'borderRadius': '10px', 'marginBottom': '30px'}),
+
         # Section principale avec deux colonnes (responsive avec flexbox)
         html.Div([
             # Colonne 1 - À propos
-            html.Div([
+            card([
                 html.H4("À propos de l'application", style={'color': '#2c3e50', 'marginBottom': '15px'}),
                 html.P([
                     "L'objectif de cette application est de prédire et d'analyser les différentes sources d'énergies et de la consommation énergétique sur le réseau électrique. ",
@@ -145,11 +215,10 @@ def create_home_page():
                     "Cette interface intuitive a été conçue pour pallier au problème de déséquilibrage énergétique et faciliter la prise de décision pour l'achat de l'électricité. ",
                     "Elle offre aussi la possibilité de retrainer nos modèles de Machine Learning et sélectionner le meilleur."
                 ], style={'textAlign': 'justify', 'lineHeight': '1.6'})
-            ], style={'backgroundColor': '#fff', 'padding': '25px', 'borderRadius': '10px',
-                     'boxShadow': '0 4px 6px rgba(0,0,0,0.1)', 'flex': '1', 'marginRight': '15px'}),
-            
+            ], {'padding': '25px', 'borderRadius': '10px', 'flex': '1', 'marginRight': '15px'}),
+
             # Colonne 2 - Comment
-            html.Div([
+            card([
                 html.H4("Comment utiliser l'application", style={'color': '#2c3e50', 'marginBottom': '15px'}),
                 html.Ol([
                     html.Li("Configurez les dates dans le menu latéral", style={'marginBottom': '8px'}),
@@ -159,12 +228,11 @@ def create_home_page():
                     html.Li(["Explorez la page ", html.Span("Analyse Production", style={'color': '#27ae60', 'fontWeight': 'bold'}), " pour l'analyse des différentes sources de production"], style={'marginBottom': '8px'}),
                     html.Li(["Utilisez la page ", html.Span("Prévision", style={'color': '#27ae60', 'fontWeight': 'bold'}), " pour générer des prédictions"], style={'marginBottom': '8px'})
                 ], style={'lineHeight': '1.6'})
-            ], style={'backgroundColor': '#fff', 'padding': '25px', 'borderRadius': '10px',
-                     'boxShadow': '0 4px 6px rgba(0,0,0,0.1)', 'flex': '1', 'marginLeft': '15px'})
+            ], {'padding': '25px', 'borderRadius': '10px', 'flex': '1', 'marginLeft': '15px'})
         ], style={'display': 'flex', 'gap': '0px', 'marginBottom': '30px'}),
-        
+
         # Navigation détaillée
-        html.Div([
+        card([
             html.H4("Navigation détaillée", style={'color': '#2c3e50', 'marginBottom': '15px'}),
             html.Ul([
                 html.Li([html.Strong("Accueil : "), "Vous êtes ici. Présentation de l'application et de ses fonctionnalités."], style={'marginBottom': '8px'}),
@@ -173,28 +241,25 @@ def create_home_page():
                 html.Li([html.Strong("Analyse Production : "), "Visualisation de la production par source d'énergie et répartitions."], style={'marginBottom': '8px'}),
                 html.Li([html.Strong("Prévisions : "), "Génération de prévisions énergétiques avec différents horizons temporels."], style={'marginBottom': '8px'})
             ], style={'lineHeight': '1.6'})
-        ], style={'backgroundColor': '#fff', 'padding': '25px', 'borderRadius': '10px',
-                 'boxShadow': '0 4px 6px rgba(0,0,0,0.1)', 'marginBottom': '30px'}),
-        
+        ], {'padding': '25px', 'borderRadius': '10px', 'marginBottom': '30px'}),
+
         # Fonctionnalités principales
         html.H3("Fonctionnalités principales", style={'color': '#2c3e50', 'marginBottom': '20px', 'textAlign': 'center'}),
-        
+
         html.Div([
-            html.Div([
+            card([
                 html.H4("Prévisions énergétiques", style={'color': '#2c3e50', 'marginBottom': '15px'}),
-                html.P("Prédictions énergétiques à différents horizons de prédiction avec visualisations interactives et analyses statistiques avancées.", 
+                html.P("Prédictions énergétiques à différents horizons de prédiction avec visualisations interactives et analyses statistiques avancées.",
                        style={'lineHeight': '1.6'})
-            ], style={'backgroundColor': '#fff', 'padding': '25px', 'borderRadius': '10px',
-                     'boxShadow': '0 4px 6px rgba(0,0,0,0.1)', 'flex': '1', 'marginRight': '15px',
-                     'height': '150px', 'display': 'flex', 'flexDirection': 'column'}),
-            
-            html.Div([
+            ], {'padding': '25px', 'borderRadius': '10px', 'flex': '1', 'marginRight': '15px',
+                'height': '150px', 'display': 'flex', 'flexDirection': 'column'}),
+
+            card([
                 html.H4("Analyse de données", style={'color': '#2c3e50', 'marginBottom': '15px'}),
-                html.P("Présentation claire des résultats pour faciliter la prise de décision avec des outils d'analyse comparative et d'optimisation.", 
+                html.P("Présentation claire des résultats pour faciliter la prise de décision avec des outils d'analyse comparative et d'optimisation.",
                        style={'lineHeight': '1.6'})
-            ], style={'backgroundColor': '#fff', 'padding': '25px', 'borderRadius': '10px',
-                     'boxShadow': '0 4px 6px rgba(0,0,0,0.1)', 'flex': '1', 'marginLeft': '15px',
-                     'height': '150px', 'display': 'flex', 'flexDirection': 'column'})
+            ], {'padding': '25px', 'borderRadius': '10px', 'flex': '1', 'marginLeft': '15px',
+                'height': '150px', 'display': 'flex', 'flexDirection': 'column'})
         ], style={'display': 'flex', 'gap': '0px'})
     ])
 
@@ -257,8 +322,8 @@ def display_page(pathname):
     [Output('data-store', 'data'),
      Output('status-div-sidebar', 'children')],
     [Input('load-button', 'n_clicks')],
-    [dash.dependencies.State('start-date-picker', 'date'),
-     dash.dependencies.State('end-date-picker', 'date')]
+    [dash.dependencies.State('start-date-picker', 'value'),
+     dash.dependencies.State('end-date-picker', 'value')]
 )
 def load_data(n_clicks, start_date, end_date):
     if n_clicks == 0:
@@ -451,10 +516,11 @@ def calculate_energy_deficit_predict(y_pred):
         
         deficit = np.zeros((y_pred.shape[0], 1))
         
+        # Ordre des colonnes: [temp, SOLAR, BIOMASS, WIND_ONSHORE, NUCLEAR, consommation_totale]
         for i in range(len(y_pred)):
-            # Production totale = somme de 1 à 5 colonnes (BIOMASS, NUCLEAR, SOLAR, WIND_ONSHORE)
+            # Production totale = colonnes 1 à 4 (SOLAR, BIOMASS, WIND_ONSHORE, NUCLEAR)
             production_total = y_pred[i, 1:5].sum()
-            # Consommation = 5ème colonne (index 4)
+            # Consommation = dernière colonne (index 5)
             consumption = y_pred[i, -1]
             # Déficit = Production - Consommation
             # Positif = Surplus (on produit plus qu'on consomme)
@@ -488,7 +554,7 @@ def calculate_energy_deficit_predict(y_pred):
             repetition_counts.append(current_count)
         
         print(f"Production - Valeurs uniques: {len(unique_productions)}, Pattern de répétition: {repetition_counts[:10]}")
-        print(f"Consommation - Min: {y_pred[:, 4].min():.2f}, Max: {y_pred[:, 4].max():.2f}, Std: {y_pred[:, 4].std():.2f}")
+        print(f"Consommation - Min: {y_pred[:, 5].min():.2f}, Max: {y_pred[:, 5].max():.2f}, Std: {y_pred[:, 5].std():.2f}")
         print(f"Déficit - Min: {deficit_flat.min():.2f}, Max: {deficit_flat.max():.2f}, Moyenne: {deficit_flat.mean():.2f}")
         
         return {
@@ -743,7 +809,7 @@ def create_consumption_vs_production_chart(deficit_info, timestamps, hist_data=N
     # Si on a des données historiques, les ajouter d'abord
     if hist_data is not None:
         # Calculer la production totale historique
-        production_sources = ['SOLAR', 'BIOMASS', 'WIND_ONSHORE', 'NUCLEAR']
+        production_sources = PRODUCTION_SOURCES
         hist_production = hist_data[production_sources].sum(axis=1) if all(s in hist_data.columns for s in production_sources) else None
         
         # Historique de consommation
@@ -843,7 +909,7 @@ def create_deficit_evolution_chart(deficit_info, timestamps, hist_data=None):
     
     # Si on a des données historiques, calculer et afficher le déficit historique
     if hist_data is not None:
-        production_sources = ['SOLAR', 'BIOMASS', 'WIND_ONSHORE', 'NUCLEAR']
+        production_sources = PRODUCTION_SOURCES
         if all(s in hist_data.columns for s in production_sources) and 'consommation_totale' in hist_data.columns:
             hist_production = hist_data[production_sources].sum(axis=1)
             hist_deficit = (hist_production - hist_data['consommation_totale']) / 1000.0  # ✅ conversion en GW
@@ -904,7 +970,7 @@ def create_deficit_evolution_chart(deficit_info, timestamps, hist_data=None):
     # Zones colorées pour surplus/déficit
     all_deficit_values = [deficit_values]
     if hist_data is not None:
-        production_sources = ['SOLAR', 'BIOMASS', 'WIND_ONSHORE', 'NUCLEAR']
+        production_sources = PRODUCTION_SOURCES
         if all(s in hist_data.columns for s in production_sources) and 'consommation_totale' in hist_data.columns:
             hist_production = hist_data[production_sources].sum(axis=1)
             hist_deficit = (hist_production - hist_data['consommation_totale']) / 1000.0
@@ -985,7 +1051,7 @@ def create_overview_tab(df):
     avg_temp = df['temp'].mean() if 'temp' in df.columns else 0
     
     # Production totale (somme de toutes les sources)
-    production_cols = [col for col in df.columns if col in ['SOLAR', 'BIOMASS', 'WIND_ONSHORE', 'NUCLEAR']]
+    production_cols = [col for col in df.columns if col in PRODUCTION_SOURCES]
     total_production = df[production_cols].mean().sum() if production_cols else 0
     
     # Calculer le déficit énergétique
@@ -995,57 +1061,27 @@ def create_overview_tab(df):
     return html.Div([
         # Cartes de métriques (avec déficit ajouté)
         html.Div([
-            html.Div([
-                html.H2(f"{avg_consumption:.0f} MW", style={'color': '#e74c3c', 'margin': '0'}),
-                html.P("Consommation Moyenne", style={'margin': '10px 0', 'fontSize': '16px'})
-            ], style={'backgroundColor': '#fff', 'padding': '25px', 'borderRadius': '12px',
-                     'boxShadow': '0 4px 6px rgba(0,0,0,0.1)', 'textAlign': 'center', 'flex': '1'}),
-            
-            html.Div([
-                html.H2(f"{avg_temp:.1f}°C", style={'color': '#f39c12', 'margin': '0'}),
-                html.P("Température Moyenne", style={'margin': '10px 0', 'fontSize': '16px'})
-            ], style={'backgroundColor': '#fff', 'padding': '25px', 'borderRadius': '12px',
-                     'boxShadow': '0 4px 6px rgba(0,0,0,0.1)', 'textAlign': 'center', 'flex': '1'}),
-            
-            html.Div([
-                html.H2(f"{total_production:.0f} MWh", style={'color': '#27ae60', 'margin': '0'}),
-                html.P("Production totale", style={'margin': '10px 0', 'fontSize': '16px'})
-            ], style={'backgroundColor': '#fff', 'padding': '25px', 'borderRadius': '12px',
-                     'boxShadow': '0 4px 6px rgba(0,0,0,0.1)', 'textAlign': 'center', 'flex': '1'}),
-            
-            html.Div([
-                html.H2(f"{avg_deficit:.0f} MW", style={'color': '#9b59b6' if avg_deficit < 0 else '#e67e22', 'margin': '0'}),
-                html.P("Déficit Moyen", style={'margin': '10px 0', 'fontSize': '16px'})
-            ], style={'backgroundColor': '#fff', 'padding': '25px', 'borderRadius': '12px',
-                     'boxShadow': '0 4px 6px rgba(0,0,0,0.1)', 'textAlign': 'center', 'flex': '1'})
+            metric_card(f"{avg_consumption:.0f} MW", "Consommation Moyenne", '#e74c3c'),
+            metric_card(f"{avg_temp:.1f}°C", "Température Moyenne", '#f39c12'),
+            metric_card(f"{total_production:.0f} MW", "Production Moyenne", '#27ae60'),
+            metric_card(f"{avg_deficit:.0f} MW", "Déficit Moyen",
+                        '#9b59b6' if avg_deficit < 0 else '#e67e22'),
         ], style={'display': 'flex', 'gap': '20px', 'marginBottom': '30px'}),
-        
+
         # Première ligne : Histogrammes empilés et Évolution du déficit
         html.Div([
-            # Histogrammes empilés annuels
-            html.Div([
-                dcc.Graph(figure=create_annual_stacked_histogram(df))
-            ], style={'backgroundColor': '#fff', 'padding': '20px', 'borderRadius': '12px',
-                     'boxShadow': '0 4px 6px rgba(0,0,0,0.1)', 'flex': '1', 'marginRight': '15px'}),
-            
-            # Évolution du déficit
-            html.Div([
-                dcc.Graph(figure=create_deficit_evolution(deficit_data))
-            ], style={'backgroundColor': '#fff', 'padding': '20px', 'borderRadius': '12px',
-                     'boxShadow': '0 4px 6px rgba(0,0,0,0.1)', 'flex': '1', 'marginLeft': '15px'})
+            card([dcc.Graph(figure=create_annual_stacked_histogram(df))],
+                 {'flex': '1', 'marginRight': '15px'}),
+            card([dcc.Graph(figure=create_deficit_evolution(deficit_data))],
+                 {'flex': '1', 'marginLeft': '15px'}),
         ], style={'display': 'flex', 'gap': '0px', 'marginBottom': '25px'}),
-        
+
         # Deuxième ligne : Comparaison consommation vs production (pleine largeur)
-        html.Div([
-            dcc.Graph(figure=create_consumption_vs_production(df))
-        ], style={'backgroundColor': '#fff', 'padding': '20px', 'borderRadius': '12px',
-                 'boxShadow': '0 4px 6px rgba(0,0,0,0.1)', 'marginBottom': '25px'}),
-        
+        card([dcc.Graph(figure=create_consumption_vs_production(df))],
+             {'marginBottom': '25px'}),
+
         # Troisième ligne : Distributions des variables principales (pleine largeur)
-        html.Div([
-            dcc.Graph(figure=create_distributions_overview(df))
-        ], style={'backgroundColor': '#fff', 'padding': '20px', 'borderRadius': '12px',
-                 'boxShadow': '0 4px 6px rgba(0,0,0,0.1)'})
+        card([dcc.Graph(figure=create_distributions_overview(df))]),
     ])
 
 def create_consumption_tab(df):
@@ -1053,54 +1089,33 @@ def create_consumption_tab(df):
     if 'consommation_totale' not in df.columns:
         return html.Div("Données de consommation non disponibles")
     
+    left = {'flex': '1', 'marginRight': '15px'}
+    right = {'flex': '1', 'marginLeft': '15px'}
+    row = {'display': 'flex', 'gap': '0px', 'marginBottom': '25px'}
+
     return html.Div([
         # Première ligne : Évolution temporelle et Distribution
         html.Div([
-            html.Div([
-                dcc.Graph(figure=create_consumption_evolution(df))
-            ], style={'backgroundColor': '#fff', 'padding': '20px', 'borderRadius': '12px',
-                     'boxShadow': '0 4px 6px rgba(0,0,0,0.1)', 'flex': '1', 'marginRight': '15px'}),
-            
-            html.Div([
-                dcc.Graph(figure=create_consumption_distribution(df))
-            ], style={'backgroundColor': '#fff', 'padding': '20px', 'borderRadius': '12px',
-                     'boxShadow': '0 4px 6px rgba(0,0,0,0.1)', 'flex': '1', 'marginLeft': '15px'})
-        ], style={'display': 'flex', 'gap': '0px', 'marginBottom': '25px'}),
-        
+            card([dcc.Graph(figure=create_consumption_evolution(df))], left),
+            card([dcc.Graph(figure=create_consumption_distribution(df))], right),
+        ], style=row),
+
         # Deuxième ligne : Saisonnalités journalière et hebdomadaire
         html.Div([
-            html.Div([
-                dcc.Graph(figure=create_daily_consumption_seasonality(df))
-            ], style={'backgroundColor': '#fff', 'padding': '20px', 'borderRadius': '12px',
-                     'boxShadow': '0 4px 6px rgba(0,0,0,0.1)', 'flex': '1', 'marginRight': '15px'}),
-            
-            html.Div([
-                dcc.Graph(figure=create_weekly_consumption_seasonality(df))
-            ], style={'backgroundColor': '#fff', 'padding': '20px', 'borderRadius': '12px',
-                     'boxShadow': '0 4px 6px rgba(0,0,0,0.1)', 'flex': '1', 'marginLeft': '15px'})
-        ], style={'display': 'flex', 'gap': '0px', 'marginBottom': '25px'}),
-        
+            card([dcc.Graph(figure=create_daily_consumption_seasonality(df))], left),
+            card([dcc.Graph(figure=create_weekly_consumption_seasonality(df))], right),
+        ], style=row),
+
         # Troisième ligne : Saisonnalités mensuelle et annuelle
         html.Div([
-            html.Div([
-                dcc.Graph(figure=create_monthly_consumption_seasonality(df))
-            ], style={'backgroundColor': '#fff', 'padding': '20px', 'borderRadius': '12px',
-                     'boxShadow': '0 4px 6px rgba(0,0,0,0.1)', 'flex': '1', 'marginRight': '15px'}),
-            
-            html.Div([
-                dcc.Graph(figure=create_yearly_consumption_seasonality(df))
-            ], style={'backgroundColor': '#fff', 'padding': '20px', 'borderRadius': '12px',
-                     'boxShadow': '0 4px 6px rgba(0,0,0,0.1)', 'flex': '1', 'marginLeft': '15px'})
-        ], style={'display': 'flex', 'gap': '0px', 'marginBottom': '25px'}),
-        
-        # Quatrième ligne : Corrélation température et Décomposition saisonnière
+            card([dcc.Graph(figure=create_monthly_consumption_seasonality(df))], left),
+            card([dcc.Graph(figure=create_yearly_consumption_seasonality(df))], right),
+        ], style=row),
+
+        # Quatrième ligne : Corrélation température
         html.Div([
-            html.Div([
-                dcc.Graph(figure=create_temperature_consumption_correlation(df))
-            ], style={'backgroundColor': '#fff', 'padding': '20px', 'borderRadius': '12px',
-                     'boxShadow': '0 4px 6px rgba(0,0,0,0.1)', 'flex': '1', 'marginRight': '15px'}),
-            
-        ], style={'display': 'flex', 'gap': '0px'})
+            card([dcc.Graph(figure=create_temperature_consumption_correlation(df))], left),
+        ], style={'display': 'flex', 'gap': '0px'}),
     ])
 
 # Fonctions pour l'analyse de consommation
@@ -1293,124 +1308,40 @@ def create_temperature_consumption_correlation(df):
     
     fig.update_layout(height=400, title_font_size=16)
     fig.update_traces(marker=dict(color='#f39c12', size=4, opacity=0.6))
-    
-    return fig
 
-def create_consumption_seasonal_decompose(df):
-    """Créer la décomposition saisonnière de la consommation"""
-    try:
-        if len(df) < 48:  # Au moins 2 jours de données
-            return go.Figure().add_annotation(
-                text="Données insuffisantes pour la décomposition saisonnière",
-                xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False
-            )
-        
-        # Réechantillonner si nécessaire
-        ts_data = df['consommation_totale'].resample('h').mean().dropna()
-        
-        if len(ts_data) < 48:
-            return go.Figure().add_annotation(
-                text="Données insuffisantes pour la décomposition saisonnière",
-                xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False
-            )
-        
-        # Décomposition saisonnière avec période journalière (24h)
-        decomposition = seasonal_decompose(ts_data, model='additive', period=8760)
-        
-        # Créer le graphique avec les 3 composantes principales
-        fig = go.Figure()
-        
-        # Série originale
-        fig.add_trace(go.Scatter(
-            x=ts_data.index,
-            y=ts_data.values,
-            mode='lines',
-            name='Série Originale',
-            line=dict(color='#2c3e50', width=1.5),
-            opacity=0.8
-        ))
-        
-        # Tendance
-        fig.add_trace(go.Scatter(
-            x=decomposition.trend.index,
-            y=decomposition.trend.values,
-            mode='lines',
-            name='Tendance',
-            line=dict(color='#e74c3c', width=2)
-        ))
-        
-        # Composante saisonnière (moyennée pour lisibilité)
-        seasonal_avg = decomposition.seasonal.groupby(decomposition.seasonal.index.hour).mean()
-        hours_extended = list(range(24)) * (len(ts_data) // 24 + 1)[:len(ts_data)]
-        seasonal_extended = [seasonal_avg[h] for h in hours_extended]
-        
-        fig.add_trace(go.Scatter(
-            x=ts_data.index,
-            y=seasonal_extended,
-            mode='lines',
-            name='Saisonnalité',
-            line=dict(color='#3498db', width=2)
-        ))
-        
-        fig.update_layout(
-            title='Décomposition Saisonnière de la Consommation',
-            title_font_size=16,
-            xaxis_title='Date',
-            yaxis_title='Consommation (MW)',
-            height=400,
-            hovermode='x unified',
-            legend=dict(orientation="h", y=1.02)
-        )
-        
-        return fig
-        
-    except Exception as e:
-        return go.Figure().add_annotation(
-            text=f"Erreur lors de la décomposition: {str(e)}",
-            xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False
-        )
+    return fig
 
 def create_production_tab(df):
     """Créer l'onglet production avec analyses saisonnières complètes"""
-    production_cols = [col for col in df.columns if col in ['SOLAR', 'BIOMASS', 'WIND_ONSHORE', 'NUCLEAR']]
+    production_cols = [col for col in df.columns if col in PRODUCTION_SOURCES]
     
     if not production_cols:
         return html.Div("Données de production non disponibles")
     
+    left = {'flex': '1', 'marginRight': '15px'}
+    right = {'flex': '1', 'marginLeft': '15px'}
+    row = {'display': 'flex', 'gap': '0px', 'marginBottom': '25px'}
+
     return html.Div([
         # Première ligne : Évolution des sources et Répartition
         html.Div([
-            html.Div([
-                dcc.Graph(figure=create_production_evolution_by_source(df))
-            ], style={'backgroundColor': '#fff', 'padding': '20px', 'borderRadius': '12px',
-                     'boxShadow': '0 4px 6px rgba(0,0,0,0.1)', 'flex': '1', 'marginRight': '15px'}),
-            
-            html.Div([
-                dcc.Graph(figure=create_production_pie_chart(df, production_cols))
-            ], style={'backgroundColor': '#fff', 'padding': '20px', 'borderRadius': '12px',
-                     'boxShadow': '0 4px 6px rgba(0,0,0,0.1)', 'flex': '1', 'marginLeft': '15px'})
-        ], style={'display': 'flex', 'gap': '0px', 'marginBottom': '25px'}),
-        
-        # Deuxième ligne : Saisonnalités hebdomadaire et mensuelle
+            card([dcc.Graph(figure=create_production_evolution_by_source(df))], left),
+            card([dcc.Graph(figure=create_production_pie_chart(df, production_cols))], right),
+        ], style=row),
+
+        # Deuxième ligne : Saisonnalité mensuelle
         html.Div([
-           
-            html.Div([
-                dcc.Graph(figure=create_monthly_production_seasonality(df, production_cols))
-            ], style={'backgroundColor': '#fff', 'padding': '20px', 'borderRadius': '12px',
-                     'boxShadow': '0 4px 6px rgba(0,0,0,0.1)', 'flex': '1', 'marginLeft': '15px'})
-        ], style={'display': 'flex', 'gap': '0px', 'marginBottom': '25px'}),
-        
+            card([dcc.Graph(figure=create_monthly_production_seasonality(df, production_cols))], right),
+        ], style=row),
+
         # Troisième ligne : Corrélations avec la température
-        html.Div([
-            dcc.Graph(figure=create_temperature_production_correlations(df, production_cols))
-        ], style={'backgroundColor': '#fff', 'padding': '20px', 'borderRadius': '12px',
-                 'boxShadow': '0 4px 6px rgba(0,0,0,0.1)'})
+        card([dcc.Graph(figure=create_temperature_production_correlations(df, production_cols))]),
     ])
 
 # Fonctions pour l'analyse de production
 def create_production_evolution_by_source(df):
     """Créer l'évolution des différentes sources de production en graphique en aire"""
-    production_cols = [col for col in df.columns if col in ['SOLAR', 'BIOMASS', 'WIND_ONSHORE', 'NUCLEAR']]
+    production_cols = [col for col in df.columns if col in PRODUCTION_SOURCES]
     
     if not production_cols:
         return go.Figure().add_annotation(
@@ -1426,7 +1357,7 @@ def create_production_evolution_by_source(df):
                   title='Évolution des Sources de Production (Graphique en Aires)')
     
     # Appliquer les couleurs personnalisées
-    colors = {'SOLAR': '#f1c40f', 'BIOMASS': '#27ae60', 'WIND_ONSHORE': '#3498db', 'NUCLEAR': '#e74c3c'}
+    colors = ENERGY_COLORS
     
     for i, trace in enumerate(fig.data):
         if i < len(production_cols):
@@ -1448,7 +1379,7 @@ def create_production_evolution_by_source(df):
 def create_production_pie_chart(df, production_cols):
     """Créer le graphique en secteurs de la production"""
     avg_production = df[production_cols].mean()
-    colors = {'SOLAR': '#f1c40f', 'BIOMASS': '#27ae60', 'WIND_ONSHORE': '#3498db', 'NUCLEAR': '#e74c3c'}
+    colors = ENERGY_COLORS
     
     fig = px.pie(
         values=avg_production.values,
@@ -1460,61 +1391,6 @@ def create_production_pie_chart(df, production_cols):
     
     return fig
 
-
-def create_weekly_production_seasonality(df, production_cols):
-    """Créer les boxplots hebdomadaires pour chaque source de production"""
-    df_weekly = df.copy()
-    df_weekly['day_name'] = df_weekly.index.day_name()
-    
-    # Créer des sous-graphiques pour chaque source
-    n_cols = min(2, len(production_cols))
-    n_rows = (len(production_cols) + n_cols - 1) // n_cols
-    
-    fig = make_subplots(
-        rows=n_rows, cols=n_cols,
-        subplot_titles=[f"{source} - Boxplot par Jour" for source in production_cols],
-        vertical_spacing=0.12,
-        horizontal_spacing=0.1
-    )
-    
-    colors = {'SOLAR': '#f1c40f', 'BIOMASS': '#27ae60', 'WIND_ONSHORE': '#3498db', 'NUCLEAR': '#e74c3c'}
-    days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-    days_fr = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche']
-    
-    for i, source in enumerate(production_cols):
-        row = i // n_cols + 1
-        col = i % n_cols + 1
-        
-        # Créer un boxplot pour chaque jour de la semaine
-        for j, day in enumerate(days_order):
-            day_data = df_weekly[df_weekly['day_name'] == day][source]
-            
-            if not day_data.empty:
-                fig.add_trace(
-                    go.Box(
-                        y=day_data,
-                        name=days_fr[j],
-                        boxpoints='outliers',
-                        marker_color=colors.get(source, '#95a5a6'),
-                        line_color='#2c3e50',
-                        showlegend=False
-                    ),
-                    row=row, col=col
-                )
-    
-    fig.update_layout(
-        title='Production par Jour avec Boxplots (Saisonnalité Hebdomadaire)',
-        title_font_size=16,
-        height=400 * n_rows,
-        showlegend=False
-    )
-    
-    # Mettre à jour les axes pour tous les sous-graphiques
-    for i in range(1, n_rows * n_cols + 1):
-        fig.update_xaxes(title_text="Jour de la semaine", row=(i-1)//n_cols + 1, col=(i-1)%n_cols + 1)
-        fig.update_yaxes(title_text="Production (MW)", row=(i-1)//n_cols + 1, col=(i-1)%n_cols + 1)
-    
-    return fig
 
 def create_monthly_production_seasonality(df, production_cols):
     """Créer les boxplots mensuels pour chaque source de production"""
@@ -1532,7 +1408,7 @@ def create_monthly_production_seasonality(df, production_cols):
         horizontal_spacing=0.1
     )
     
-    colors = {'SOLAR': '#f1c40f', 'BIOMASS': '#27ae60', 'WIND_ONSHORE': '#3498db', 'NUCLEAR': '#e74c3c'}
+    colors = ENERGY_COLORS
     months_names = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 
                    'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc']
     
@@ -1591,7 +1467,7 @@ def create_temperature_production_correlations(df, production_cols):
         horizontal_spacing=0.1
     )
     
-    colors = {'SOLAR': '#f1c40f', 'BIOMASS': '#27ae60', 'WIND_ONSHORE': '#3498db', 'NUCLEAR': '#e74c3c'}
+    colors = ENERGY_COLORS
     
     for i, source in enumerate(production_cols):
         row = i // n_cols + 1
@@ -1672,14 +1548,7 @@ def create_prediction_tab(df):
         ], style={'backgroundColor': '#f8f9fa', 'padding': '25px', 'borderRadius': '10px', 'marginBottom': '25px'}),
         
         # Résultats des prévisions
-        html.Div(id='prediction-results', children=[
-            html.Div([
-                html.H4("Prévisions Énergétiques", style={'color': '#2c3e50', 'marginBottom': '20px'}),
-                html.P("Configurez les paramètres ci-dessus et cliquez sur 'Générer Prévision' pour voir les résultats.",
-                      style={'textAlign': 'center', 'color': '#7f8c8d', 'fontSize': '16px', 'padding': '40px'})
-            ], style={'backgroundColor': '#fff', 'padding': '25px', 'borderRadius': '10px',
-                     'boxShadow': '0 4px 6px rgba(0,0,0,0.1)'})
-        ]),
+        html.Div(id='prediction-results', children=[prediction_placeholder()]),
         
         # Informations sur les modèles
         html.Div([
@@ -1696,7 +1565,7 @@ def create_prediction_tab(df):
 def calculate_energy_deficit(df):
     """Calculer le déficit énergétique (production - consommation)"""
     try:
-        production_cols = [col for col in df.columns if col in ['SOLAR', 'BIOMASS', 'WIND_ONSHORE', 'NUCLEAR']]
+        production_cols = [col for col in df.columns if col in PRODUCTION_SOURCES]
         
         if not production_cols or 'consommation_totale' not in df.columns:
             return pd.DataFrame()
@@ -1714,7 +1583,7 @@ def calculate_energy_deficit(df):
 def create_annual_stacked_histogram(df):
     """Créer un histogramme empilé annuel des différentes énergies"""
     try:
-        production_cols = [col for col in df.columns if col in ['SOLAR', 'BIOMASS', 'WIND_ONSHORE', 'NUCLEAR']]
+        production_cols = [col for col in df.columns if col in PRODUCTION_SOURCES]
         
         if not production_cols:
             return go.Figure().add_annotation(
@@ -1732,7 +1601,7 @@ def create_annual_stacked_histogram(df):
         
         fig = go.Figure()
         
-        colors = {'SOLAR': '#f1c40f', 'BIOMASS': '#27ae60', 'WIND_ONSHORE': '#3498db', 'NUCLEAR': '#e74c3c'}
+        colors = ENERGY_COLORS
         
         for col in production_cols:
             fig.add_trace(go.Bar(
@@ -1780,13 +1649,13 @@ def create_deficit_evolution(deficit_data):
         
         fig.add_trace(go.Bar(
             x=df_daily.index,
-            y=df_daily['deficit'] / 10e3,
+            y=df_daily['deficit'] / 1e3,  # conversion MW -> GW
             name='Déficit Énergétique',
             marker=dict(
                 color=colors,
                 line=dict(color='rgba(0,0,0,0.3)', width=1)
             ),
-            text=[f"{x:.0f}" for x in df_daily['deficit']],
+            text=[f"{x / 1e3:.2f}" for x in df_daily['deficit']],  # étiquettes en GW
             textposition='outside',
             textfont=dict(size=10, color='black')
         ))
@@ -1825,7 +1694,7 @@ def create_deficit_evolution(deficit_data):
 def create_consumption_vs_production(df):
     """Créer un graphique linéaire comparant consommation et production totale"""
     try:
-        production_cols = [col for col in df.columns if col in ['SOLAR', 'BIOMASS', 'WIND_ONSHORE', 'NUCLEAR']]
+        production_cols = [col for col in df.columns if col in PRODUCTION_SOURCES]
         
         if not production_cols or 'consommation_totale' not in df.columns:
             return go.Figure().add_annotation(
@@ -1892,7 +1761,7 @@ def create_distributions_overview(df):
         
         # Variables principales à analyser (inclure toujours SOLAR)
         main_vars = ['consommation_totale']
-        production_cols = [col for col in df.columns if col in ['SOLAR', 'BIOMASS', 'WIND_ONSHORE', 'NUCLEAR']]
+        production_cols = [col for col in df.columns if col in PRODUCTION_SOURCES]
         
         # Ajouter SOLAR en priorité s'il existe
         if 'SOLAR' in production_cols:
@@ -1967,13 +1836,9 @@ def create_distributions_overview(df):
 )
 def generate_predictions(n_clicks, stored_data, horizon):
     if n_clicks == 0 or not stored_data:
-        return html.Div([
-            html.H4("Prévisions Énergétiques", style={'color': '#2c3e50', 'marginBottom': '20px'}),
-            html.P("Configurez les paramètres ci-dessus et cliquez sur 'Générer Prévision' pour voir les résultats.",
-                  style={'textAlign': 'center', 'color': '#7f8c8d', 'fontSize': '16px', 'padding': '40px'})
-        ], style={'backgroundColor': '#fff', 'padding': '25px', 'borderRadius': '10px',
-                 'boxShadow': '0 4px 6px rgba(0,0,0,0.1)'})
-    
+        return prediction_placeholder()
+
+
     try:
         # Préparer les données
         df = prepare_dataframe(stored_data)

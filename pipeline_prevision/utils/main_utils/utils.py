@@ -18,7 +18,7 @@ from pipeline_prevision.constant.training_pipeline import SIX_MONTHS, FIVE_MONTH
 from sklearn.metrics import r2_score, mean_absolute_error
 from sklearn.model_selection import GridSearchCV
 
-from meteostat import Point, Hourly
+from meteostat import Point, hourly, Parameter, stations
 
 load_dotenv()
 
@@ -258,23 +258,28 @@ def extract_conso(start_date: str, end_date: str):
 def extract_temperature(start_date, end_date, var_name="temp"):
 
   try:
-    LON = os.getenv("LON")
-    LAT = os.getenv("LAT")
-    lon = float(LON)
-    lat = float(LAT)
-    
-    location = Point(lat, lon)
-    start_date = start_date + " 00:00"
-    end_date = end_date + " 23:00"
-    
-    start = datetime.strptime(start_date, '%Y-%m-%d %H:%M')
-    end = datetime.strptime(end_date, '%Y-%m-%d %H:%M')
+    lon = float(os.getenv("LON"))
+    lat = float(os.getenv("LAT"))
 
-    dataframe = Hourly(location, start, end)
-    dataframe = dataframe.fetch()
+    location = Point(lat, lon)
+
+    start = datetime.strptime(start_date + " 00:00", '%Y-%m-%d %H:%M')
+    end = datetime.strptime(end_date + " 23:00", '%Y-%m-%d %H:%M')
+
+    # meteostat 2.x : l'API par Point ne renvoie plus de données directement.
+    # On résout le Point vers la station météo la plus proche, puis on
+    # récupère la température horaire (Parameter.TEMP -> colonne "temp").
+    nearby = stations.nearby(location)
+    if nearby is None or nearby.empty:
+        raise ValueError("Aucune station météo trouvée à proximité")
+    station_id = str(nearby.index[0])
+
+    dataframe = hourly(station_id, start, end, parameters=[Parameter.TEMP]).fetch()
+    if dataframe is None or dataframe.empty:
+        raise ValueError("Aucune donnée de température disponible pour la période demandée")
+
     dataframe.index.rename("timestamp", inplace=True)
-    df = dataframe[var_name]
-    df = pd.DataFrame(df).astype(float)
+    df = pd.DataFrame(dataframe[var_name]).astype(float)
     return df
 
   except Exception as e:
