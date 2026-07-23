@@ -4,7 +4,7 @@ import glob
 import numpy as np
 import pandas as pd
 
-from sklearn.impute import KNNImputer
+from sklearn.impute import KNNImputer, SimpleImputer
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.pipeline import Pipeline
 from pipeline_prevision.constant.training_pipeline import DATA_TRANSFORMATION_IMPUTER_PARAMS
@@ -61,13 +61,15 @@ class DataTransformation:
         )
 
         try:
-           
-           imputer:KNNImputer=KNNImputer(**DATA_TRANSFORMATION_IMPUTER_PARAMS)
+           # KNNImputer calcule une matrice de distances O(n²) -> intenable en
+           # mémoire sur un dataset horaire de plusieurs dizaines de milliers de
+           # lignes. Les données étant quasi sans valeurs manquantes, un
+           # SimpleImputer (médiane) donne un résultat équivalent pour une
+           # fraction de la mémoire. Repasser à KNNImputer si peu de lignes.
+           imputer = SimpleImputer(strategy="median")
            scaler:MinMaxScaler=MinMaxScaler()
-           logging.info(
-                f"Initialise KNNImputer with {DATA_TRANSFORMATION_IMPUTER_PARAMS}"
-            )
-           processor:Pipeline=Pipeline([("imputer", imputer), 
+           logging.info("Initialise SimpleImputer(strategy='median') + MinMaxScaler")
+           processor:Pipeline=Pipeline([("imputer", imputer),
                                         ("scaler", scaler)])
 
            return processor
@@ -96,10 +98,23 @@ class DataTransformation:
             # Generate windows sliding 
             X_train, y_train = window_generator(transformed_train_df, 
                                                 lookback=LOOKBACK, horizon=HORIZON)
-            X_valid, y_valid = window_generator(transformed_submission_df, 
-                                                lookback=LOOKBACK, horizon=HORIZON)
-            X_test, y_test = window_generator(transformed_test_df, 
-                                              lookback=LOOKBACK, horizon=HORIZON)
+            # Le contexte ajouté vient uniquement du passé du split précédent :
+            # la première cible de chaque split est utilisable sans fuite future.
+            valid_context = np.concatenate(
+                [transformed_train_df[-LOOKBACK:], transformed_submission_df], axis=0
+            )
+            test_history = np.concatenate(
+                [transformed_train_df, transformed_submission_df], axis=0
+            )
+            test_context = np.concatenate(
+                [test_history[-LOOKBACK:], transformed_test_df], axis=0
+            )
+            X_valid, y_valid = window_generator(
+                valid_context, lookback=LOOKBACK, horizon=HORIZON
+            )
+            X_test, y_test = window_generator(
+                test_context, lookback=LOOKBACK, horizon=HORIZON
+            )
 
             train_arr = np.concatenate([X_train, y_train], axis=1)  
 
@@ -116,7 +131,9 @@ class DataTransformation:
             save_object(self.data_transformation_config.transformed_object_file_path, 
                         preprocessor_object)
             
-            save_object(file_path="final_models/preprocessor.pkl", obj=preprocessor_object)
+            # Dossier de sortie paramétrable (voir MODEL_OUTPUT_DIR dans model_trainer)
+            output_dir = os.getenv("MODEL_OUTPUT_DIR", "candidate_models")
+            save_object(file_path=os.path.join(output_dir, "preprocessor.pkl"), obj=preprocessor_object)
             
             #preparing artifacts
             data_transformation_artifact=DataTransformationArtifact(

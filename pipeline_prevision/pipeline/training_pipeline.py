@@ -137,8 +137,10 @@ class TrainingPipeline:
             data_transformation_artifact = self.start_data_transformation(data_validation_artifact = data_validation_artifact)
             model_trainer_artifact = self.start_model_trainer(data_transformation_artifact = data_transformation_artifact)
             
-            self.sync_artifact_dir_to_s3()
-            self.sync_saved_model_dir_to_s3()
+            # La synchronisation S3 est optionnelle et n'est pas configurée dans
+            # ce dépôt. Elle ne doit pas faire échouer un entraînement local réussi.
+            if hasattr(self, "s3_sync"):
+                self.sync_artifact_dir_to_s3()
 
             return model_trainer_artifact
         

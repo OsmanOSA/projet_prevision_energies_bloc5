@@ -22,18 +22,30 @@ class ForecastModel:
         except Exception as e:
             raise ForecastingException(e, sys)
     
+    def _with_feature_names(self, x):
+        """Préserve les noms appris par le préprocesseur pour une entrée tabulaire."""
+        if isinstance(x, pd.DataFrame):
+            return x
+        feature_names = getattr(self.preprocessor, "feature_names_in_", None)
+        values = np.asarray(x)
+        if (
+            feature_names is not None
+            and values.ndim == 2
+            and values.shape[1] == len(feature_names)
+        ):
+            return pd.DataFrame(values, columns=feature_names)
+        return x
+
     def predict(self, x):
         
         try:
-            x_transform = self.preprocessor.transform(x)
+
+            x_transform = self.preprocessor.transform(self._with_feature_names(x))
 
             x_transform, y_transform = window_generator(data = x_transform,
                                                         lookback = LOOKBACK,
                                                         horizon = HORIZON)
             
-            print("x_transform shape:", x_transform.shape)
-            print("y_transform shape:", y_transform.shape)
-
             if x_transform.shape[0] == 0:
                 raise ValueError(f"Pas assez de séquences pour faire une prédiction. "
                                 f"Vérifie la taille des données après transformation.")
@@ -43,8 +55,6 @@ class ForecastModel:
 
             y_pred = self.model.predict(x_transform)
 
-            print("y pred shape:", y_pred.shape)
-            print("y tes shape:", y_transform.shape)
             
             
             y_pred_inverse = self.preprocessor.named_steps['scaler'].inverse_transform(y_pred)
@@ -59,8 +69,9 @@ class ForecastModel:
     def predict_multistep(self, x, n_futur: int):
         
         try:
+            
             # Transformation des données
-            x_transform = self.preprocessor.transform(x)
+            x_transform = self.preprocessor.transform(self._with_feature_names(x))
             
             # Génération des séquences
             if x_transform.shape[0] == LOOKBACK:

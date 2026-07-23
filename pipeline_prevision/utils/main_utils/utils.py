@@ -16,7 +16,8 @@ from pipeline_prevision.logging.logger import logging
 from pipeline_prevision.constant.training_pipeline import SIX_MONTHS, FIVE_MONTHS, TYPE_SOURCE
 
 from sklearn.metrics import r2_score, mean_absolute_error
-from sklearn.model_selection import GridSearchCV
+# NB : hyperopt n'est importé que dans evaluate_models (entraînement), pas au
+# niveau module -> l'ingestion et l'inférence n'en dépendent pas (image Airflow).
 
 from meteostat import Point, hourly, Parameter, stations
 
@@ -151,7 +152,7 @@ def window_generator(data: np.ndarray,
 
         arr = data.values if isinstance(data, pd.DataFrame) else data
 
-        for i in range(lookback, len(arr) - horizon):
+        for i in range(lookback, len(arr) - horizon + 1):
             X.append(arr[i - lookback:i, :])
             y.append(arr[i:i + horizon, :])
 
@@ -161,33 +162,54 @@ def window_generator(data: np.ndarray,
         raise ForecastingException(e, sys) from e
     
 
-def evaluate_models(X_train, y_train, 
-                    X_valid, y_valid, 
-                    models,param):
+def evaluate_models(X_train, y_train,
+                    X_valid, y_valid,
+                    models, param, max_evals: int = 15):
+    """Optimisation bayésienne des hyperparamètres (hyperopt / TPE).
+
+    Pour chaque modèle, minimise la MAE de validation via l'algorithme TPE
+    (Tree-structured Parzen Estimator) au lieu d'un balayage exhaustif
+    (GridSearchCV). Chaque modèle de `models` est réajusté en place avec ses
+    meilleurs hyperparamètres, et la fonction renvoie {nom_modele: MAE_valid}.
+
+    param : {nom_modele: espace de recherche hyperopt (hp.*)}.
+    """
     try:
+        # Import paresseux : hyperopt n'est requis que pour l'entraînement.
+        from hyperopt import fmin, tpe, Trials, STATUS_OK, space_eval
+
         report = {}
 
-        for i in range(len(list(models))):
-            model = list(models.values())[i]
-            para=param[list(models.keys())[i]]
+        for name, model in models.items():
+            space = param[name]
 
-            gs = GridSearchCV(model,para,cv=3, error_score='raise')
-            gs.fit(X_train,y_train)
+            def objective(candidate, _model=model):
+                # MAE de validation pour un jeu d'hyperparamètres candidat.
+                _model.set_params(**candidate)
+                _model.fit(X_train, y_train)
+                pred = _model.predict(X_valid)
+                return {"loss": mean_absolute_error(y_valid, pred), "status": STATUS_OK}
 
-            model.set_params(**gs.best_params_)
-            model.fit(X_train,y_train)
+            trials = Trials()
+            best = fmin(
+                fn=objective,
+                space=space,
+                algo=tpe.suggest,
+                max_evals=max_evals,
+                trials=trials,
+                show_progressbar=False,
+                rstate=np.random.default_rng(42),
+            )
+            best_params = space_eval(space, best)
 
-            #model.fit(X_train, y_train)  # Train model
+            # Réajustement final avec les meilleurs hyperparamètres.
+            model.set_params(**best_params)
+            model.fit(X_train, y_train)
+            test_model_score = mean_absolute_error(y_valid, model.predict(X_valid))
+            report[name] = test_model_score
 
-            y_train_pred = model.predict(X_train)
-
-            y_test_pred = model.predict(X_valid)
-
-            train_model_score = mean_absolute_error(y_train, y_train_pred)
-
-            test_model_score = mean_absolute_error(y_valid, y_test_pred)
-
-            report[list(models.keys())[i]] = test_model_score
+            logging.info("TPE %s -> MAE valid=%.4f | params=%s",
+                         name, test_model_score, best_params)
 
         return report
 

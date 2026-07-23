@@ -1,22 +1,17 @@
-FROM python:3.10-slim
+FROM python:3.12-slim
 
-# Définir répertoire de travail
 WORKDIR /app
 
-# Installer les dépendances système pour LightGBM
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    libgomp1 \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update     && apt-get install -y --no-install-recommends build-essential libgomp1     && rm -rf /var/lib/apt/lists/*
 
-# Copier les fichiers de l'application
-COPY . /app
-
-# Installer dépendances Python
+COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Exposer le port (Heroku utilise $PORT automatiquement)
-EXPOSE 80
+COPY . /app
 
-# Lancer FastAPI avec Uvicorn (Heroku définit $PORT)
-CMD uvicorn app:app --host 0.0.0.0 --port $PORT
+ENV PORT=8000
+EXPOSE 8000
+
+# API FastAPI historique. Les endpoints de prédiction exigent final_models/
+# (volume ou artefact restauré par le déploiement).
+CMD ["/bin/sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT}"]

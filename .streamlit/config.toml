@@ -1,0 +1,10 @@
+# Thème clair aligné sur styles.css (accent teal #0e7490, neutres slate).
+[theme]
+base = "light"
+primaryColor = "#0e7490"
+backgroundColor = "#f6f8fa"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#1f2b37"
+
+[server]
+headless = true

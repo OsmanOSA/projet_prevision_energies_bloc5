@@ -1,0 +1,21 @@
+# Datasource PostgreSQL provisionnée automatiquement au démarrage de Grafana.
+# Grafana interroge directement la base applicative (tables observations,
+# forecasts, pipeline_runs) pour construire les panneaux KPI.
+apiVersion: 1
+
+datasources:
+  - name: EnergIA PostgreSQL
+    uid: energia_pg
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    user: ${POSTGRES_USER}
+    jsonData:
+      database: ${POSTGRES_DB}
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: false
+    secureJsonData:
+      password: ${POSTGRES_PASSWORD}
+    isDefault: true
+    editable: true

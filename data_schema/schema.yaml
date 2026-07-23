@@ -13,3 +13,12 @@ numeric_columns:
   - WIND_ONSHORE
   - consommation_totale
   - temp
+# Bornes de contrôle métier : un dépassement déclenche une alerte traçable mais
+# ne modifie jamais silencieusement la donnée historique.
+plausible_bounds:
+  temp: {min: -30, max: 50}
+  SOLAR: {min: 0, max: 25000}
+  BIOMASS: {min: 0, max: 1000}
+  WIND_ONSHORE: {min: 0, max: 30000}
+  NUCLEAR: {min: 0, max: 70000}
+  consommation_totale: {min: 0, max: 120000}

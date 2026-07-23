@@ -1,0 +1,58 @@
+# Règle d'alerte : dégradation de la performance du modèle.
+# Évalue la MAE moyenne des dernières 24 h sur la consommation ; au-delà du
+# seuil, l'alerte part vers le pont qui déclenche le réentraînement.
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: energia-mlops
+    folder: EnergIA
+    interval: 5m
+    rules:
+      - uid: energia_model_degradation
+        title: Dégradation du modèle (MAE)
+        condition: C
+        for: 5m
+        noDataState: NoData
+        execErrState: Error
+        labels:
+          severity: critical
+          team: mlops
+        annotations:
+          summary: "MAE journalière au-dessus du seuil : réentraînement requis"
+          description: "La MAE moyenne sur 24 h de consommation_totale dépasse le seuil défini. Un réentraînement sur données fraîches est déclenché."
+        data:
+          # A — MAE moyenne des dernières 24 h (SQL sur la base applicative)
+          - refId: A
+            relativeTimeRange:
+              from: 86400
+              to: 0
+            datasourceUid: energia_pg
+            model:
+              refId: A
+              format: table
+              rawQuery: true
+              rawSql: >-
+                SELECT avg(mae) AS mae
+                FROM forecast_metrics
+                WHERE variable = 'consommation_totale'
+                  AND eval_ts > now() - interval '1 day'
+          # B — réduction en une valeur scalaire
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          # C — comparaison au seuil (condition d'alerte)
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [1500]

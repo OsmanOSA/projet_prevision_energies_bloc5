@@ -18,6 +18,8 @@ __pycache__/
 logs
 logs.log
 *.log
+airflow/logs/
+airflow/plugins/
 
 # ML / artefacts
 mlruns/
@@ -25,6 +27,8 @@ catboost_info/
 notebooks/catboost_info/
 *.pkl
 final_models/
+candidate_models/
+models_archive/
 Artifacts/
 
 # OS / IDE

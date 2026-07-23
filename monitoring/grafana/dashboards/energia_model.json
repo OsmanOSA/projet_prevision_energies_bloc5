@@ -1,0 +1,86 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 0,
+  "time": { "from": "now-30d", "to": "now" },
+  "timezone": "browser",
+  "title": "EnergIA — Performance modèle",
+  "uid": "energia-model",
+  "version": 1,
+  "schemaVersion": 39,
+  "refresh": "5m",
+  "tags": ["energia", "modele"],
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Couverture IC moyenne (dernière éval.)",
+      "datasource": { "type": "postgres", "uid": "energia_pg" },
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": {
+        "unit": "percent", "decimals": 1,
+        "thresholds": { "mode": "absolute", "steps": [
+          { "color": "red", "value": null }, { "color": "orange", "value": 80 }, { "color": "green", "value": 90 }
+        ] }
+      }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "none" },
+      "targets": [ { "refId": "A", "format": "table", "rawQuery": true, "datasource": { "type": "postgres", "uid": "energia_pg" },
+        "rawSql": "SELECT avg(coverage) AS cov FROM forecast_metrics WHERE eval_ts = (SELECT max(eval_ts) FROM forecast_metrics)" } ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Points évalués (dernière éval.)",
+      "datasource": { "type": "postgres", "uid": "energia_pg" },
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "none" },
+      "targets": [ { "refId": "A", "format": "table", "rawQuery": true, "datasource": { "type": "postgres", "uid": "energia_pg" },
+        "rawSql": "SELECT sum(n_points) AS n FROM forecast_metrics WHERE eval_ts = (SELECT max(eval_ts) FROM forecast_metrics)" } ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "MAE consommation (H+24)",
+      "datasource": { "type": "postgres", "uid": "energia_pg" },
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "MW", "decimals": 0, "color": { "mode": "fixed", "fixedColor": "purple" } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "none" },
+      "targets": [ { "refId": "A", "format": "table", "rawQuery": true, "datasource": { "type": "postgres", "uid": "energia_pg" },
+        "rawSql": "SELECT mae FROM forecast_metrics WHERE variable='consommation_totale' AND horizon_h=24 AND eval_ts=(SELECT max(eval_ts) FROM forecast_metrics) LIMIT 1" } ]
+    },
+    {
+      "id": 4,
+      "type": "barchart",
+      "title": "MAE moyen par variable (dernière éval.)",
+      "datasource": { "type": "postgres", "uid": "energia_pg" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 4 },
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "palette-classic" } }, "overrides": [] },
+      "options": { "orientation": "horizontal", "xTickLabelRotation": 0, "showValue": "auto", "legend": { "showLegend": false } },
+      "targets": [ { "refId": "A", "format": "table", "rawQuery": true, "datasource": { "type": "postgres", "uid": "energia_pg" },
+        "rawSql": "SELECT variable AS \"Variable\", round(avg(mae)::numeric,1) AS \"MAE\" FROM forecast_metrics WHERE eval_ts=(SELECT max(eval_ts) FROM forecast_metrics) GROUP BY variable ORDER BY 2 DESC" } ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "MAE par horizon — consommation",
+      "datasource": { "type": "postgres", "uid": "energia_pg" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 4 },
+      "fieldConfig": { "defaults": { "unit": "MW", "custom": { "drawStyle": "bars", "fillOpacity": 60, "lineWidth": 1 } }, "overrides": [] },
+      "options": { "legend": { "showLegend": false }, "tooltip": { "mode": "single" }, "xField": "Horizon (h)" },
+      "targets": [ { "refId": "A", "format": "table", "rawQuery": true, "datasource": { "type": "postgres", "uid": "energia_pg" },
+        "rawSql": "SELECT horizon_h AS \"Horizon (h)\", round(mae::numeric,0) AS \"MAE\" FROM forecast_metrics WHERE variable='consommation_totale' AND eval_ts=(SELECT max(eval_ts) FROM forecast_metrics) ORDER BY horizon_h" } ]
+    },
+    {
+      "id": 6,
+      "type": "table",
+      "title": "Métriques détaillées (dernière évaluation)",
+      "datasource": { "type": "postgres", "uid": "energia_pg" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 13 },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "options": { "showHeader": true },
+      "targets": [ { "refId": "A", "format": "table", "rawQuery": true, "datasource": { "type": "postgres", "uid": "energia_pg" },
+        "rawSql": "SELECT variable AS \"Variable\", horizon_h AS \"Horizon\", round(mae::numeric,1) AS \"MAE\", round(rmse::numeric,1) AS \"RMSE\", round(mape::numeric,1) AS \"MAPE %\", round(bias::numeric,1) AS \"Biais\", round(coverage::numeric,0) AS \"Couv IC %\" FROM forecast_metrics WHERE eval_ts=(SELECT max(eval_ts) FROM forecast_metrics) ORDER BY variable, horizon_h" } ]
+    }
+  ]
+}

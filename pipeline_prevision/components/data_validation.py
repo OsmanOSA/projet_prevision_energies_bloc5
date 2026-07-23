@@ -1,163 +1,264 @@
-import sys
+import hashlib
 import os
-import glob
+import sys
+
 import numpy as np
 import pandas as pd
+from scipy.stats import ks_2samp
 
-
+from pipeline_prevision.entity.artifact_entity import (
+    DataIngestionArtifact,
+    DataValidationArtifact,
+)
+from pipeline_prevision.entity.config_entity import DataValidationConfig
 from pipeline_prevision.exception.exception import ForecastingException
 from pipeline_prevision.logging.logger import logging
-from pipeline_prevision.constant import training_pipeline
-from pipeline_prevision.entity.artifact_entity import DataIngestionArtifact, DataValidationArtifact
-from pipeline_prevision.entity.config_entity import DataValidationConfig
-from pipeline_prevision.constant.training_pipeline import SCHEMA_FILE_PATH, PATH_FILE_DATASET
+from pipeline_prevision.constant.training_pipeline import SCHEMA_FILE_PATH
 from pipeline_prevision.utils.main_utils.utils import read_yaml_file, write_yaml_file
-from scipy.stats import ks_2samp
 
 
 class DataValidation:
+    """Valide le schéma, la chronologie et la qualité des trois partitions."""
 
-    def __init__(self, 
-                 data_ingestion_artifact: DataIngestionArtifact, 
-                 data_validation_config: DataValidationConfig):
-        
+    def __init__(
+        self,
+        data_ingestion_artifact: DataIngestionArtifact,
+        data_validation_config: DataValidationConfig,
+    ):
         try:
-            
             self.data_ingestion_artifact = data_ingestion_artifact
             self.data_validation_config = data_validation_config
             self._schema_config = read_yaml_file(SCHEMA_FILE_PATH)
-            
+        except Exception as exc:
+            raise ForecastingException(exc, sys) from exc
 
-        except Exception as e:
-            raise ForecastingException(e, sys)
-
-    @staticmethod    
+    @staticmethod
     def read_data(file_path) -> pd.DataFrame:
-        
         try:
-            
-            return pd.read_csv(file_path, sep=None, engine="python", parse_dates=["timestamp"], index_col="timestamp")
-            
-        
-        except Exception as e:
-            raise ForecastingException(e, sys)
-        
+            return pd.read_csv(
+                file_path,
+                sep=None,
+                engine="python",
+                parse_dates=["timestamp"],
+                index_col="timestamp",
+            )
+        except Exception as exc:
+            raise ForecastingException(exc, sys) from exc
 
-    def validate_number_of_columns(self, 
-                                   dataframe: pd.DataFrame) -> bool:
-        try:
-            
-            number_of_columns = len(self._schema_config["columns"])
-            logging.info(f"Required number of columns : {number_of_columns}")
-            logging.info(f"Data frmae has columns : {len(dataframe.columns)}")
+    @property
+    def expected_columns(self) -> dict[str, str]:
+        return {
+            name: dtype
+            for item in self._schema_config["columns"]
+            for name, dtype in item.items()
+        }
 
-            if len(dataframe.columns) == number_of_columns:
-                return True
-            else:
-                return False
-        except Exception as e:
-            raise ForecastingException(e, sys)
+    def validate_dataframe(self, dataframe: pd.DataFrame, split_name: str) -> dict:
+        """Retourne un rapport sérialisable ; aucune donnée n'est corrigée en silence."""
+        errors: list[str] = []
+        warnings: list[str] = []
+        expected = self.expected_columns
 
-    def detect_dataset_drift(self, 
-                              base_df: pd.DataFrame, 
-                              current_df: pd.DataFrame, 
-                              threshold: float = 0.05) -> bool:
-        
-        try: 
-            status = True
-            report = {}
+        missing_columns = sorted(set(expected) - set(dataframe.columns))
+        unexpected_columns = sorted(set(dataframe.columns) - set(expected))
+        if missing_columns:
+            errors.append(f"colonnes manquantes: {missing_columns}")
+        if unexpected_columns:
+            errors.append(f"colonnes inattendues: {unexpected_columns}")
 
-            for column in base_df.columns:
-                
-                is_same_distribution = ks_2samp(base_df[column], current_df[column])
+        if not isinstance(dataframe.index, pd.DatetimeIndex):
+            errors.append("index non temporel")
+        else:
+            if dataframe.index.hasnans:
+                errors.append("horodatages invalides (NaT)")
+            duplicate_count = int(dataframe.index.duplicated().sum())
+            if duplicate_count:
+                errors.append(f"{duplicate_count} horodatage(s) dupliqué(s)")
+            if not dataframe.index.is_monotonic_increasing:
+                errors.append("horodatages non triés")
+            deltas = dataframe.index.to_series().diff().dropna()
+            non_hourly = int((deltas != pd.Timedelta(hours=1)).sum())
+            if non_hourly:
+                errors.append(f"{non_hourly} rupture(s) de fréquence horaire")
 
-                if threshold <= is_same_distribution.pvalue:
-                    is_found = False
-                else:
-                    is_found = True
-                    status = False
+        common = [column for column in expected if column in dataframe.columns]
+        non_numeric = [
+            column
+            for column in common
+            if not pd.api.types.is_numeric_dtype(dataframe[column])
+        ]
+        if non_numeric:
+            errors.append(f"colonnes non numériques: {non_numeric}")
 
-                report.update(
-                    {column: {
-                        "pvalue": float(is_same_distribution.pvalue),
-                        "drift_status": is_found
-                    }}
+        missing_values = {
+            column: int(dataframe[column].isna().sum()) for column in common
+        }
+        if any(missing_values.values()):
+            errors.append(f"valeurs manquantes: {missing_values}")
+
+        infinite_values = {}
+        for column in common:
+            if pd.api.types.is_numeric_dtype(dataframe[column]):
+                infinite_values[column] = int(
+                    np.isinf(dataframe[column].to_numpy(dtype=float)).sum()
+                )
+        if any(infinite_values.values()):
+            errors.append(f"valeurs infinies: {infinite_values}")
+
+        for column in [name for name in common if name != "temp"]:
+            count = int((dataframe[column] < 0).sum())
+            if count:
+                errors.append(f"{column}: {count} valeur(s) négative(s)")
+
+        outliers = {}
+        for column, bounds in self._schema_config.get("plausible_bounds", {}).items():
+            if column not in dataframe.columns:
+                continue
+            low, high = bounds.get("min"), bounds.get("max")
+            mask = pd.Series(False, index=dataframe.index)
+            if low is not None:
+                mask |= dataframe[column] < low
+            if high is not None:
+                mask |= dataframe[column] > high
+            count = int(mask.sum())
+            if count:
+                outliers[column] = count
+                warnings.append(
+                    f"{column}: {count} valeur(s) hors bornes plausibles "
+                    f"[{low}, {high}]"
                 )
 
-                drift_report_file_path = self.data_validation_config.drift_report_file_path
+        return {
+            "split": split_name,
+            "rows": int(len(dataframe)),
+            "start": dataframe.index.min().isoformat() if len(dataframe) else None,
+            "end": dataframe.index.max().isoformat() if len(dataframe) else None,
+            "dtypes": {column: str(dataframe[column].dtype) for column in common},
+            "errors": errors,
+            "warnings": warnings,
+            "missing_values": missing_values,
+            "infinite_values": infinite_values,
+            "plausibility_outliers": outliers,
+            "valid": not errors,
+        }
 
-                # Create directory
-                dir_path = os.path.dirname(drift_report_file_path)
-                os.makedirs(dir_path, exist_ok=True)
-                write_yaml_file(file_path=drift_report_file_path, content=report)
+    @staticmethod
+    def detect_dataset_drift(
+        base_df: pd.DataFrame,
+        current_df: pd.DataFrame,
+        threshold: float = 0.05,
+    ) -> dict:
+        """KS par variable ; la dérive est signalée, pas utilisée comme veto aveugle."""
+        report = {}
+        for column in base_df.columns.intersection(current_df.columns):
+            result = ks_2samp(base_df[column].dropna(), current_df[column].dropna())
+            report[column] = {
+                "pvalue": float(result.pvalue),
+                "drift_status": bool(result.pvalue < threshold),
+            }
+        return report
 
-        except Exception as e:
-            raise ForecastingException(e, sys)
-        
-
+    @staticmethod
+    def _fingerprint(dataframe: pd.DataFrame) -> str:
+        hashed = pd.util.hash_pandas_object(dataframe, index=True).values
+        return hashlib.sha256(hashed.tobytes()).hexdigest()
 
     def initiate_data_validation(self) -> DataValidationArtifact:
-
-        try: 
-            train_file_path = self.data_ingestion_artifact.trained_file_path
-            submission_file_path = self.data_ingestion_artifact.submission_file_path
-            test_file_path = self.data_ingestion_artifact.test_file_path
-
-            # read the data from train, submission and test
-            train_dataframe = self.read_data(train_file_path)
-            submission_dataframe = self.read_data(submission_file_path)
-            test_dataframe = self.read_data(test_file_path)
-
-            # Validate number of columns in dataframe 
-            status = self.validate_number_of_columns(dataframe=train_dataframe)
-            
-            if not status:
-                error_message = "Train dataframe does not contain all columns. \n"
-
-            status = self.validate_number_of_columns(dataframe=submission_dataframe)
-
-            if not status:
-                error_message = "Submission dataframe does not contain all columns. \n"
-
-
-            status = self.validate_number_of_columns(dataframe=test_dataframe)
-
-            if not status:
-                error_message = "Test dataframe does not contain all columns. \n"
-
-            # Lets check data drift
-            status = self.detect_dataset_drift(base_df=test_dataframe, 
-                                                current_df=submission_dataframe)
-            
-            dir_path = os.path.dirname(self.data_validation_config.valid_train_file_path)
-            os.makedirs(dir_path, exist_ok=True)
-
-            train_dataframe.to_csv(
-                self.data_validation_config.valid_train_file_path, 
-                header = True
+        try:
+            train = self.read_data(self.data_ingestion_artifact.trained_file_path)
+            validation = self.read_data(
+                self.data_ingestion_artifact.submission_file_path
             )
+            test = self.read_data(self.data_ingestion_artifact.test_file_path)
 
-            submission_dataframe.to_csv(
-                self.data_validation_config.valid_submission_file_path,
-                header = True
+            frames = {"train": train, "validation": validation, "test": test}
+            quality = {
+                name: self.validate_dataframe(frame, name)
+                for name, frame in frames.items()
+            }
+
+            chronology_errors = []
+            if len(train) and len(validation) and train.index.max() >= validation.index.min():
+                chronology_errors.append("train et validation se chevauchent")
+            if len(validation) and len(test) and validation.index.max() >= test.index.min():
+                chronology_errors.append("validation et test se chevauchent")
+
+            fingerprints = {
+                name: self._fingerprint(frame) for name, frame in frames.items()
+            }
+            partition_errors = []
+            if fingerprints["validation"] == fingerprints["test"]:
+                partition_errors.append("validation et test sont identiques")
+
+            validation_errors = [
+                f"{name}: {error}"
+                for name, item in quality.items()
+                for error in item["errors"]
+            ]
+            validation_errors.extend(chronology_errors)
+            validation_errors.extend(partition_errors)
+
+            report = {
+                "validation_status": not validation_errors,
+                "quality": quality,
+                "chronology_errors": chronology_errors,
+                "partition_errors": partition_errors,
+                "fingerprints": fingerprints,
+                "drift": {
+                    "train_to_validation": self.detect_dataset_drift(
+                        train, validation
+                    ),
+                    "validation_to_test": self.detect_dataset_drift(
+                        validation, test
+                    ),
+                },
+            }
+            report_path = self.data_validation_config.drift_report_file_path
+            os.makedirs(os.path.dirname(report_path), exist_ok=True)
+            write_yaml_file(file_path=report_path, content=report)
+
+            if validation_errors:
+                os.makedirs(
+                    os.path.dirname(
+                        self.data_validation_config.invalid_train_file_path
+                    ),
+                    exist_ok=True,
+                )
+                train.to_csv(self.data_validation_config.invalid_train_file_path)
+                validation.to_csv(
+                    self.data_validation_config.invalid_submission_file_path
+                )
+                test.to_csv(self.data_validation_config.invalid_test_file_path)
+                raise ValueError(
+                    "Validation des données échouée: "
+                    + "; ".join(validation_errors)
+                )
+
+            os.makedirs(
+                os.path.dirname(self.data_validation_config.valid_train_file_path),
+                exist_ok=True,
             )
-
-            test_dataframe.to_csv(
-                self.data_validation_config.valid_test_file_path,
-                header = True
+            train.to_csv(self.data_validation_config.valid_train_file_path)
+            validation.to_csv(
+                self.data_validation_config.valid_submission_file_path
             )
+            test.to_csv(self.data_validation_config.valid_test_file_path)
 
-            data_validation_artifact = DataValidationArtifact(
-                validation_status = status, 
-                valid_train_file_path = self.data_ingestion_artifact.trained_file_path,
-                valid_submission_file_path = self.data_ingestion_artifact.submission_file_path,
-                valid_test_file_path = self.data_ingestion_artifact.test_file_path, 
-                invalid_train_file_path = None, 
-                invalid_submission_file_path = None, 
-                invalid_test_file_path = None,
-                drift_report_file_path = self.data_validation_config.drift_report_file_path
+            logging.info(
+                "Validation OK: %s lignes train, %s validation, %s test",
+                len(train),
+                len(validation),
+                len(test),
             )
-
-            return data_validation_artifact
-        except Exception as e:
-            raise ForecastingException(e, sys)
+            return DataValidationArtifact(
+                validation_status=True,
+                valid_train_file_path=self.data_validation_config.valid_train_file_path,
+                valid_submission_file_path=self.data_validation_config.valid_submission_file_path,
+                valid_test_file_path=self.data_validation_config.valid_test_file_path,
+                invalid_train_file_path=self.data_validation_config.invalid_train_file_path,
+                invalid_submission_file_path=self.data_validation_config.invalid_submission_file_path,
+                invalid_test_file_path=self.data_validation_config.invalid_test_file_path,
+                drift_report_file_path=report_path,
+            )
+        except Exception as exc:
+            raise ForecastingException(exc, sys) from exc

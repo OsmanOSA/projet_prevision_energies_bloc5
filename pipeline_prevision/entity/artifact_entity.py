@@ -43,7 +43,8 @@ class ModelTrainerArtifact:
     trained_model_file_path: str
     train_metric_artifact: ForecastMetricArtifact
     valid_metric_artifact: ForecastMetricArtifact
-    #test_metric_artifact: ForecastMetricArtifact
+    test_metric_artifact: ForecastMetricArtifact
+    metadata_file_path: str
 
 
 

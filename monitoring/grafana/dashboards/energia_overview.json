@@ -1,0 +1,102 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "time": { "from": "now-1y", "to": "now" },
+  "timezone": "browser",
+  "title": "EnergIA — Vue d'ensemble",
+  "uid": "energia-overview",
+  "version": 1,
+  "schemaVersion": 39,
+  "refresh": "1m",
+  "tags": ["energia"],
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Fraîcheur des données (h)",
+      "datasource": { "type": "postgres", "uid": "energia_pg" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "decimals": 1,
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "orange", "value": 2 },
+            { "color": "red", "value": 6 }
+          ] }
+        }, "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "none" },
+      "targets": [ { "refId": "A", "format": "table", "datasource": { "type": "postgres", "uid": "energia_pg" },
+        "rawQuery": true, "rawSql": "SELECT EXTRACT(EPOCH FROM (now() - max(ts)))/3600 AS freshness FROM observations" } ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Observations en base",
+      "datasource": { "type": "postgres", "uid": "energia_pg" },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "none" },
+      "targets": [ { "refId": "A", "format": "table", "datasource": { "type": "postgres", "uid": "energia_pg" },
+        "rawQuery": true, "rawSql": "SELECT count(*) AS observations FROM observations" } ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Prévisions en base",
+      "datasource": { "type": "postgres", "uid": "energia_pg" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "purple" } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "none" },
+      "targets": [ { "refId": "A", "format": "table", "datasource": { "type": "postgres", "uid": "energia_pg" },
+        "rawQuery": true, "rawSql": "SELECT count(*) AS forecasts FROM forecasts" } ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Runs réussis (24 h)",
+      "datasource": { "type": "postgres", "uid": "energia_pg" },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "green" } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "none" },
+      "targets": [ { "refId": "A", "format": "table", "datasource": { "type": "postgres", "uid": "energia_pg" },
+        "rawQuery": true, "rawSql": "SELECT count(*) FILTER (WHERE status='success') AS ok FROM pipeline_runs WHERE run_ts > now() - interval '24 hours'" } ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Consommation vs Production (réalisé)",
+      "datasource": { "type": "postgres", "uid": "energia_pg" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 4 },
+      "fieldConfig": { "defaults": { "unit": "MW", "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 8 } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [ { "refId": "A", "format": "time_series", "datasource": { "type": "postgres", "uid": "energia_pg" },
+        "rawQuery": true, "rawSql": "SELECT ts AS \"time\", consommation_totale AS \"Consommation\", (COALESCE(solar,0)+COALESCE(biomass,0)+COALESCE(wind_onshore,0)+COALESCE(nuclear,0)) AS \"Production\" FROM observations WHERE $__timeFilter(ts) ORDER BY ts" } ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Déficit énergétique (GW)",
+      "datasource": { "type": "postgres", "uid": "energia_pg" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 4 },
+      "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 20, "gradientMode": "opacity" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "single" } },
+      "targets": [ { "refId": "A", "format": "time_series", "datasource": { "type": "postgres", "uid": "energia_pg" },
+        "rawQuery": true, "rawSql": "SELECT ts AS \"time\", (COALESCE(solar,0)+COALESCE(biomass,0)+COALESCE(wind_onshore,0)+COALESCE(nuclear,0) - consommation_totale)/1000.0 AS \"Déficit (GW)\" FROM observations WHERE $__timeFilter(ts) ORDER BY ts" } ]
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Derniers runs de pipelines",
+      "datasource": { "type": "postgres", "uid": "energia_pg" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 13 },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "options": { "showHeader": true },
+      "targets": [ { "refId": "A", "format": "table", "datasource": { "type": "postgres", "uid": "energia_pg" },
+        "rawQuery": true, "rawSql": "SELECT run_ts AS \"Heure\", dag_id AS \"DAG\", status AS \"Statut\", rows AS \"Lignes\", round(duration_s::numeric,1) AS \"Durée (s)\" FROM pipeline_runs ORDER BY id DESC LIMIT 20" } ]
+    }
+  ]
+}

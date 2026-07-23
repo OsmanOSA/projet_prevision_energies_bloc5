@@ -1,0 +1,18 @@
+# Dépendances runtime installées dans l'image Airflow.
+# Sous-ensemble strict de requirements.txt : uniquement ce dont les DAGs
+# (ingestion + prévision) ont besoin à l'exécution. On garde l'image légère
+# et on limite les conflits avec les dépendances épinglées par Airflow.
+pandas>=2.2
+numpy>=1.26
+requests>=2.31
+python-dotenv>=1.0
+PyYAML>=6.0
+dill>=0.3.7
+# NB : ne PAS épingler SQLAlchemy ici — Airflow 2.10 impose SQLAlchemy 1.4.x.
+# Le code DB du projet utilise l'API "future" compatible 1.4 et 2.0.
+psycopg2-binary>=2.9
+meteostat>=2.0,<3.0
+scikit-learn>=1.3
+# Nécessaires pour désérialiser + prédire avec le modèle entraîné (final_models/)
+xgboost>=2.0
+lightgbm>=4.0

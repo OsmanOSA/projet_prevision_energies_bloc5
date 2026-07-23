@@ -1,0 +1,27 @@
+# Point de contact : Grafana notifie le pont d'alerte, qui déclenche le DAG
+# de réentraînement via l'API Airflow.
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: airflow-retrain
+    receivers:
+      - uid: airflow_retrain_webhook
+        type: webhook
+        disableResolveMessage: false
+        settings:
+          url: http://alert-bridge:8000/grafana
+          httpMethod: POST
+
+# Routage : les alertes portant l'étiquette team=mlops partent vers le pont.
+policies:
+  - orgId: 1
+    receiver: airflow-retrain
+    group_by: ["alertname"]
+    routes:
+      - receiver: airflow-retrain
+        object_matchers:
+          - ["team", "=", "mlops"]
+        group_wait: 30s
+        group_interval: 5m
+        repeat_interval: 12h

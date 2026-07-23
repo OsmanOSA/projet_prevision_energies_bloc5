@@ -1,0 +1,203 @@
+# Infrastructure locale de la plateforme EnergIA.
+# Phase 0 : PostgreSQL (données applicatives).
+# Phase 1 : Airflow (orchestration) — base de métadonnées séparée.
+# Les services Prometheus/Grafana viendront à la phase Observabilité.
+#
+# Démarrage complet :  docker compose up -d --build
+# Données seules       :  docker compose up -d postgres
+# UI Airflow           :  http://localhost:8080  (admin / admin)
+# Arrêt                :  docker compose down     (les volumes survivent)
+
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: docker/airflow/Dockerfile
+  env_file:
+    - path: .env
+      required: false
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+    # API REST déclenchable de l'extérieur (webhook Grafana -> pont d'alerte)
+    AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session"
+    # Seuil de dégradation surveillé (revalidé côté DAG)
+    RETRAIN_MAE_THRESHOLD: "${RETRAIN_MAE_THRESHOLD:-1500}"
+    PYTHONPATH: /opt/energia
+    # Suivi d'expériences (service `mlflow`, pas localhost depuis un conteneur)
+    MLFLOW_TRACKING_URI: http://mlflow:5000
+    # Accès à la base de données applicative (service `postgres`)
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: "5432"
+    POSTGRES_USER: ${POSTGRES_USER:-energia}
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-energia}
+    POSTGRES_DB: ${POSTGRES_DB:-energia}
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./airflow/logs:/opt/airflow/logs
+    - ./airflow/plugins:/opt/airflow/plugins
+    - .:/opt/energia                       # code projet (scripts, pipeline_prevision, frontend)
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on:
+    airflow-postgres:
+      condition: service_healthy
+    postgres:
+      condition: service_healthy
+
+services:
+  # --- Données applicatives ---
+  postgres:
+    image: postgres:16-alpine
+    container_name: energia_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-energia}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-energia}
+      POSTGRES_DB: ${POSTGRES_DB:-energia}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - energia_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-energia} -d ${POSTGRES_DB:-energia}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # --- Métadonnées Airflow (isolées des données applicatives) ---
+  airflow-postgres:
+    image: postgres:16-alpine
+    container_name: energia_airflow_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # --- Initialisation Airflow (migrations + compte admin) ---
+  airflow-init:
+    <<: *airflow-common
+    container_name: energia_airflow_init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate
+        airflow users create \
+          --username admin --password admin \
+          --firstname Admin --lastname EnergIA \
+          --role Admin --email admin@energia.local || true
+    restart: on-failure
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: energia_airflow_scheduler
+    command: scheduler
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: energia_airflow_web
+    command: webserver
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  # --- Observabilité : Grafana branché directement sur PostgreSQL ---
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: energia_grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # Injectées dans le datasource provisionné
+      POSTGRES_USER: ${POSTGRES_USER:-energia}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-energia}
+      POSTGRES_DB: ${POSTGRES_DB:-energia}
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # --- Pont d'alerte : traduit la notification Grafana en appel API Airflow ---
+  alert-bridge:
+    build:
+      context: .
+      dockerfile: docker/alert_bridge/Dockerfile
+    container_name: energia_alert_bridge
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      AIRFLOW_API_URL: http://airflow-webserver:8080
+      RETRAIN_DAG_ID: retrain_on_degradation
+      AIRFLOW_USER: admin
+      AIRFLOW_PASSWORD: admin
+
+  # --- Suivi d'expériences MLflow (backend PostgreSQL, artefacts servis) ---
+  mlflow:
+    build:
+      context: .
+      dockerfile: docker/mlflow/Dockerfile
+    container_name: energia_mlflow
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      MLFLOW_BACKEND_STORE_URI: postgresql+psycopg2://${POSTGRES_USER:-energia}:${POSTGRES_PASSWORD:-energia}@postgres:5432/${POSTGRES_DB:-energia}
+    volumes:
+      - mlflow_artifacts:/mlartifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # --- App KPI interactive (Streamlit) branchée sur PostgreSQL ---
+  streamlit:
+    build:
+      context: .
+      dockerfile: docker/streamlit/Dockerfile
+    container_name: energia_streamlit
+    restart: unless-stopped
+    command: ["streamlit", "run", "streamlit_app/app_main.py", "--server.port=8501", "--server.address=0.0.0.0"]
+    ports:
+      - "8501:8501"
+    environment:
+      PYTHONPATH: /app
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-energia}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-energia}
+      POSTGRES_DB: ${POSTGRES_DB:-energia}
+    volumes:
+      - .:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  energia_pgdata:
+  airflow_pgdata:
+  grafana_data:
+  mlflow_artifacts:

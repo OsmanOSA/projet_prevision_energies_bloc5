@@ -1,0 +1,16 @@
+.venv
+venv
+.git
+__pycache__
+**/__pycache__
+*.pyc
+logs
+airflow/logs
+airflow/plugins
+mlruns
+notebooks
+catboost_info
+**/catboost_info
+*.log
+.pytest_cache
+.ipynb_checkpoints

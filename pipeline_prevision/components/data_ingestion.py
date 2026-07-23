@@ -1,7 +1,5 @@
 import sys
 import os
-import glob
-import numpy as np
 import pandas as pd
 
 from pathlib import Path
@@ -12,7 +10,6 @@ from pipeline_prevision.constant.training_pipeline import PATH_FILE_DATASET
 ## Configuration of the Data Ingestion Config
 from pipeline_prevision.entity.config_entity import DataIngestionConfig
 from pipeline_prevision.entity.artifact_entity import DataIngestionArtifact
-from sklearn.model_selection import train_test_split
 
 
 class DataIngestion:
@@ -58,17 +55,36 @@ class DataIngestion:
 
         try: 
 
-            train_set, test_set = train_test_split(dataframe, 
-                                                   test_size=self.data_ingestion_config.train_test_split_ratio, 
-                                                   random_state=0, shuffle=False)
-            
-            logging.info("Performed train test split on the dataframe.")
+            if not isinstance(dataframe.index, pd.DatetimeIndex):
+                raise ValueError("Le découpage temporel exige un DatetimeIndex")
 
-            train_set, valid_set = train_test_split(train_set, 
-                                                   test_size=self.data_ingestion_config.train_valid_split_ratio, 
-                                                   random_state=0, shuffle=False)
-            
-            logging.info("Performed train valid split on the train set.")
+            dataframe = dataframe.sort_index()
+            if dataframe.index.hasnans:
+                raise ValueError("Des horodatages invalides (NaT) sont présents")
+            if dataframe.index.has_duplicates:
+                duplicates = int(dataframe.index.duplicated().sum())
+                raise ValueError(f"{duplicates} horodatage(s) dupliqué(s) détecté(s)")
+
+            n_rows = len(dataframe)
+            test_size = max(1, int(n_rows * self.data_ingestion_config.train_test_split_ratio))
+            train_valid = dataframe.iloc[:-test_size]
+            test_set = dataframe.iloc[-test_size:]
+            valid_size = max(1, int(len(train_valid) * self.data_ingestion_config.train_valid_split_ratio))
+            train_set = train_valid.iloc[:-valid_size]
+            valid_set = train_valid.iloc[-valid_size:]
+
+            if min(len(train_set), len(valid_set), len(test_set)) == 0:
+                raise ValueError(
+                    "Dataset insuffisant pour créer trois partitions temporelles non vides"
+                )
+
+            logging.info(
+                "Découpage temporel: train=%s (%s -> %s), validation=%s (%s -> %s), "
+                "test=%s (%s -> %s)",
+                len(train_set), train_set.index.min(), train_set.index.max(),
+                len(valid_set), valid_set.index.min(), valid_set.index.max(),
+                len(test_set), test_set.index.min(), test_set.index.max(),
+            )
 
             logging.info("Existed split_data_as_train_test_valid method of DataIngestion class.")
 
@@ -78,14 +94,14 @@ class DataIngestion:
             logging.info("Exporting train, valid and test set file path")
 
             train_set.to_csv(self.data_ingestion_config.training_file_path, header=True)
-            test_set.to_csv(self.data_ingestion_config.submission_file_path, header=True)
+            valid_set.to_csv(self.data_ingestion_config.submission_file_path, header=True)
             test_set.to_csv(self.data_ingestion_config.testing_file_path, header=True)
 
             logging.info("Exported train, valid and test set file path")
+            return train_set, valid_set, test_set
             
         except Exception as e:
             raise ForecastingException(e, sys)
-        pass
 
     def initiate_data_ingestion(self):
 
@@ -98,7 +114,10 @@ class DataIngestion:
                 dataframe_dict[series_name] = df.rename(columns={"Production": series_name})
 
             # Fusionner toutes les séries sur l'index Date
-            dataframe = pd.concat(dataframe_dict.values(), axis=1, join="inner")
+            if not dataframe_dict:
+                raise FileNotFoundError(f"Aucun fichier CSV trouvé dans {PATH_FILE_DATASET}")
+
+            dataframe = pd.concat(dataframe_dict.values(), axis=1, join="inner").sort_index()
 
             self.export_data_into_feature_store(dataframe)
 

@@ -1,107 +1,222 @@
 ![Python](https://img.shields.io/badge/python-3.12-3776AB)
-![Platform](https://img.shields.io/badge/platform-Windows-0078D6)
-![Dash](https://img.shields.io/badge/built%20with-Dash-119DFF)
-![FastAPI](https://img.shields.io/badge/built%20with-FastAPI-009688)
-![MLFlow](https://img.shields.io/badge/built%20with-MLFlow-0194E2)
+![Streamlit](https://img.shields.io/badge/built%20with-Streamlit-FF4B4B)
+![Airflow](https://img.shields.io/badge/orchestration-Airflow-017CEE)
+![PostgreSQL](https://img.shields.io/badge/data-PostgreSQL-4169E1)
+![MLflow](https://img.shields.io/badge/tracking-MLflow-0194E2)
+![Grafana](https://img.shields.io/badge/monitoring-Grafana-F46800)
 ![Docker](https://img.shields.io/badge/built%20with-Docker-2496ED)
-![Heroku](https://img.shields.io/badge/built%20with-Heroku-430098)
 
+# EnergIA — Prévision et pilotage du système électrique français
 
-# Prévisions énergétiques (Productions et Consommation)
+Application MLOps de prévision et d'analyse de la consommation et de la
+production électrique en France (RTE) enrichie de données météo
+(Meteostat). Le projet couvre l'ensemble de la chaîne : ingestion horaire,
+validation et détection de dérive, entraînement avec sélection
+d'hyperparamètres, prévision multi-horizon avec intervalles conformes,
+évaluation continue prévu/réalisé, promotion champion/challenger, et
+supervision (Airflow + Grafana), le tout restitué dans un dashboard
+Streamlit.
 
-Ce projet est une application de prédiction et d'analyse des productions et de la consommation énergétique en France.
-Elle permet d'estimer, à différents horizons de prévision, la puissance fournie par diverses sources d'énergie ainsi que la demande nationale.
+> **Périmètre couvert** : quatre filières de production (solaire, biomasse,
+> éolien terrestre, nucléaire) + consommation totale + température. Ni
+> l'hydraulique, ni le thermique fossile, ni les échanges transfrontaliers,
+> ni les pertes réseau ne sont disponibles : les écarts
+> production/consommation affichés dans l'application sont donc **partiels**
+> et ne constituent pas le solde électrique national.
 
-Conçue avec Dash, elle s'appuie sur l'API de RTE et intègre un pipeline ETL complet pour collecter, transformer et exploiter les données en temps réel.
-
-## Architecture du projet
-
-![Architecture du projet](images/architecture.svg)
-
-
-### Structure du bloc data ingestion
-![Bloc data ingestion](images/Structure_data_ingestion.svg)
-
-
-## Structure du projet
+## Architecture
 
 ```
-structure_projet/
-├── .github/
-│   └── workflows/
-├── data_schema/
-├── frontend/
-├── images/
-├── notebooks/
-├── pipeline_prevision/
-│   ├── cloud/
-│   ├── components/
-│   ├── constant/
-│   ├── entity/
-│   ├── exception/
-│   ├── logging/
-│   ├── pipeline/
-│   └── utils/
-│       ├── main_utils/
-│       └── ml_utils/
-├── .gitignore
-├── Dockerfile
-├── Procfile
-├── main.py
-├── app.py
-├── requirements.txt
-├── setup.py
-└── README.md
+RTE (API conso + prod) ─┐
+Meteostat (température) ┴──► ingestion (scripts/ingest.py, DAG ingest_hourly @hourly)
+                              │  upsert idempotent
+                              ▼
+                        PostgreSQL (observations, forecasts, forecast_metrics,
+                                    pipeline_runs)
+                              │
+        ┌─────────────────────┼─────────────────────────┐
+        ▼                     ▼                         ▼
+ entraînement            prévision J+1             évaluation continue
+ (pipeline_prevision/    (scripts/forecast.py,     (scripts/evaluate.py,
+  components/*, main.py, DAG forecast_daily 06h)    DAG evaluate_daily 06h30)
+  scripts/retrain.py)          │                         │
+        │                     ▼                         ▼
+        │              intervalles conformes      forecast_metrics
+        ▼              dynamiques (backtest             │
+  champion/challenger    interne récent)                 ▼
+  (final_models/ vs                              Grafana (dashboards +
+   candidate_models/)                              alerte de dégradation)
+        │                                                 │
+        ▼                                                 ▼
+  MLflow (tracking + registre,                    alert-bridge ──► Airflow API
+   alias `champion`/`challenger`)                  (DAG retrain_on_degradation,
+        │                                           revalidé contre le seuil
+        ▼                                           avant tout réentraînement)
+  Streamlit (streamlit_app/, 7 pages :
+   Accueil, Vue d'ensemble, Analyse
+   Consommation, Analyse Production,
+   Prévisions, Performance modèle, Pipelines)
 ```
-## Installation & Lancement
+
+Le dashboard Streamlit et l'API FastAPI (`app.py`, déploiement autonome
+optionnel) lisent uniquement des artefacts déjà produits — aucune logique
+d'entraînement ne s'exécute dans l'interface.
+
+## Stack technique
+
+| Domaine | Outils |
+|---|---|
+| Langage | Python 3.12.4 (voir `.python-version`) |
+| Données | pandas, numpy, PostgreSQL (SQLAlchemy + psycopg2) |
+| Modèles | scikit-learn, XGBoost, LightGBM, statsmodels, hyperopt (TPE) |
+| Sources de données | API RTE (consommation, production), Meteostat (température) |
+| Orchestration | Apache Airflow (LocalExecutor) |
+| Suivi d'expériences | MLflow (registre de modèles, alias champion/challenger) |
+| Dashboard | Streamlit + Plotly |
+| Service d'inférence | FastAPI (déploiement autonome optionnel, `app.py`) |
+| Supervision | Grafana (branché sur PostgreSQL) + service `alert-bridge` |
+| Conteneurisation | Docker / Docker Compose |
+| Qualité | pytest, ruff, GitHub Actions (CI) |
+
+## Chemin des données
+
+`RTE + Meteostat → ingestion (upsert PostgreSQL) → validation (schéma,
+chronologie, dérive KS) → transformation (imputation médiane + MinMaxScaler,
+fenêtres glissantes lookback=36h/horizon=1h) → entraînement (XGBoost /
+LightGBM, sélection bayésienne, comparaison à une baseline de persistance) →
+enregistrement (MLflow + artefacts hashés SHA-256) → prévision (intervalles
+conformes dynamiques) → évaluation continue (prévu vs réalisé) → affichage
+Streamlit → supervision Grafana`.
+
+Le découpage entraînement/validation/test est **strictement chronologique**
+(aucun mélange aléatoire) ; l'imputer et le scaler sont ajustés uniquement
+sur le train ; le contexte de fenêtrage ajouté à la validation/au test ne
+provient que du passé du split précédent.
+
+## Installation & lancement
 
 ### Prérequis
 
-- **Python 3.12**
-- **Deux clés API RTE** (Production & Consommation)
-- **Git**
-- *(Optionnel, recommandé pour la production)* Docker
+- Python 3.12
+- Docker (recommandé pour l'environnement complet)
+- Deux paires de clés API RTE (consommation + production) et un point
+  géographique pour Meteostat, si vous relancez l'ingestion
 
----
+### Configuration
 
-### Configuration des variables d’environnement
+Copier `.env.example` en `.env` et compléter les identifiants RTE/Meteostat
+(non versionnés). Les valeurs PostgreSQL par défaut correspondent déjà au
+`docker-compose.yml`.
 
-Créer un fichier `.env` à la racine du projet avec les clés suivantes :
+### Stack complète (Docker Compose)
 
-```env
-LAT =
-LON =
-CLIENT_ID=VOTRE_ID_CLIENT_CONSO
-CLIENT_SECRET=VOTRE_PASSWORD_CLIENT_CONSO
-CLIENT_ID_2=VOTRE_ID_CLIENT_PROD
-CLIENT_SECRET_2=VOTRE_PASSWORD_CLIENT_PROD 
+```bash
+docker compose up -d --build
 ```
-### Installation locale
 
-```
-# 1. Cloner le dépôt
-git clone https://github.com/OsmanOSA/projet_prevision_energies_bloc5.git
-cd prevision_energetiques
+| Service | URL |
+|---|---|
+| Streamlit | http://localhost:8501 |
+| Airflow | http://localhost:8080 (admin / admin — à changer en dehors d'un usage local) |
+| MLflow | http://localhost:5000 |
+| Grafana | http://localhost:3000 (admin / admin — idem) |
 
-# 2. Créer et activer un environnement virtuel
+Démarrer uniquement la base de données : `docker compose up -d postgres`.
+Arrêter : `docker compose down` (les volumes persistent).
+
+### Développement local (sans Docker)
+
+```bash
 python -m venv .venv
-source .venv/bin/activate       # Linux/MacOS
-.venv\Scripts\activate          # Windows
+.venv\Scripts\activate            # Windows
+source .venv/bin/activate         # Linux/macOS
 
-# 3. Installer les dépendances
-pip install -r requirements.txt
+pip install -r requirements-dev.txt   # requirements.txt + pytest + ruff
 
-# 4. Lancer l'application (Dash ou FastAPI selon le point d'entrée)
-uvicorn app:app --reload        # Lance FastAPI + Dash (via les routes /docs ou /dashboard)
-# ou
-python main.py   # Lancer le pipeline d'entrainement
+docker compose up -d postgres     # base de données requise par l'app et les scripts
+
+streamlit run streamlit_app/app_main.py
 ```
 
-### Lancement avec Docker
+### Pipeline d'entraînement
+
+```bash
+python main.py                     # ingestion -> validation -> transformation -> entraînement
+python -m scripts.retrain          # entraîne un challenger et le promeut s'il bat le champion
+```
+
+### Scripts opérationnels (préfigurent les DAGs Airflow)
+
+```bash
+python -m scripts.ingest 2024-01-01 2024-01-07   # ingestion d'une période
+python -m scripts.forecast 24                     # prévision J+1 (horizon en heures)
+python -m scripts.evaluate                        # évaluation prévu vs réalisé
+python -m scripts.backfill_forecasts 30 24         # rejoue des prévisions historiques
+```
+
+### Qualité
+
+```bash
+pytest -q                                          # tests unitaires
+RUN_STREAMLIT_INTEGRATION=1 pytest -q tests/test_streamlit_integration.py  # rendu des 7 pages (nécessite PostgreSQL peuplé)
+ruff check .                                        # lint (règles syntaxiques : E9, F63, F7, F82)
+docker compose config -q                            # valide docker-compose.yml
+```
+
+## Modèles et validation
+
+- **Cible** : température, production par filière suivie (solaire, biomasse,
+  éolien terrestre, nucléaire) et consommation totale — prévision
+  multi-sortie (un seul modèle prédit les six variables).
+- **Régime natif** : horizon 1 heure (`HORIZON=1`, `LOOKBACK=36`). Les
+  horizons plus longs sont obtenus par autorégression (le modèle réinjecte
+  ses propres prédictions), avec intervalles de confiance conformes qui
+  s'élargissent avec l'horizon.
+- **Sélection de modèle** : XGBoost et LightGBM (via `MultiOutputRegressor`),
+  hyperparamètres optimisés par recherche bayésienne (hyperopt/TPE) sur la
+  validation ; le modèle retenu est celui de MAE de validation la plus
+  basse.
+- **Baseline** : chaque modèle est comparé, par variable, à une baseline de
+  persistance (dernière valeur observée) sur le test — le rapport
+  `metadata.json` de chaque artefact conserve ce comparatif
+  (`beats_persistence`).
+- **Versionnement** : chaque modèle entraîné produit un `metadata.json`
+  (hash SHA-256 du modèle et des CSV sources, commit Git, hyperparamètres,
+  métriques de test par variable, versions runtime). MLflow conserve
+  l'historique complet des runs et un registre de modèles avec les alias
+  `challenger`/`champion`.
+- **Promotion** : un challenger n'est promu en champion (`scripts/retrain.py`)
+  que s'il bat le champion actuel sur un backtest récent — jamais
+  automatiquement à la fin de l'entraînement.
+
+## Limites connues
+
+- Périmètre de production restreint à quatre filières (voir encart
+  ci-dessus) : les écarts affichés ne sont pas le solde électrique
+  national.
+- Le lint CI (`ruff`) ne vérifie que des erreurs syntaxiques (E9, F63, F7,
+  F82), pas un style complet.
+- Les identifiants par défaut de `docker-compose.yml` (Airflow, Grafana,
+  PostgreSQL) sont prévus pour un usage local uniquement et doivent être
+  changés avant tout partage du déploiement.
+- Le schéma de données (`data_schema/schema.yaml`) couvre les six variables
+  du modèle ; toute nouvelle source de données nécessite de l'étendre.
+
+## Structure du dépôt
 
 ```
-# 1. Construire l'image Docker
-docker build -t prevision-energies .
-# 2. Lancer l'image
-docker run -p 8000:8000 prevision-energies
+pipeline_prevision/       # cœur ML : ingestion, validation, transformation, entraînement, DB, utils
+  components/             # étapes du pipeline d'entraînement
+  db/                      # accès PostgreSQL (observations, prévisions, métriques, runs)
+  entity/                  # configs et artefacts typés
+  utils/ml_utils/          # estimator, métriques, inférence locale (local_forecaster)
+streamlit_app/            # dashboard (7 pages) + accès aux données
+dags/                      # DAGs Airflow (ingestion, prévision, évaluation, réentraînement)
+scripts/                   # exécutions unitaires préfigurant les DAGs
+docker/                    # Dockerfiles par service (airflow, mlflow, streamlit, alert_bridge)
+monitoring/grafana/        # dashboards et provisioning Grafana
+data_schema/schema.yaml    # schéma et bornes plausibles des données
+tests/                     # tests unitaires et d'intégration
+app.py                     # service FastAPI autonome (déploiement optionnel du modèle seul)
+main.py                    # exécution du pipeline d'entraînement complet
 ```

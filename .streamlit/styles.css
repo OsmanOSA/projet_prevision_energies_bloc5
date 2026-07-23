@@ -1,0 +1,398 @@
+/* ==========================================================================
+   EnergIA — feuille de style de l'application Streamlit
+   Identité « salle de contrôle réseau » : rail de navigation sombre, plan de
+   travail clair où les cartes ressortent, accent teal unique. L'accent UI est
+   volontairement distinct des couleurs de filières des graphes.
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
+
+/* --------------------------------------------------------- 1. Tokens */
+:root {
+    --accent:        #0e7490;
+    --accent-strong: #0b5f74;
+    --accent-light:  #22a2bd;
+    --accent-soft:   #e2f1f5;
+    --amber:         #b45309;
+
+    --bg:      #e8eef4;   /* plan de travail : assez soutenu pour faire ressortir les cartes */
+    --surface: #ffffff;
+    --border:  #dce4ed;
+
+    --nav-bg-top:    #10222e;   /* rail de navigation sombre */
+    --nav-bg-bottom: #17323f;
+    --nav-ink:       #cbd8e1;
+    --nav-ink-dim:   #8aa0b0;
+
+    --ink:   #16242f;
+    --muted: #47586a;
+    --faint: #8798a8;
+
+    --good: #15803d;
+    --warn: #b45309;
+    --crit: #b91c1c;
+
+    --radius: 12px;
+    --shadow-sm: 0 1px 2px rgba(16, 32, 48, .05), 0 2px 6px rgba(16, 32, 48, .06);
+    --shadow-md: 0 6px 20px rgba(16, 32, 48, .10);
+
+    /* Alias utilisés dans les pages */
+    --main-title-color:  #0e7490;
+    --description-color: #47586a;
+    --secondary-accent:  #b45309;
+}
+
+/* ----------------------------------------------------- 2. Base / app */
+html, body, [class*="css"] {
+    font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.stApp { background: var(--bg) !important; }
+
+.block-container {
+    padding-top: 2.5rem !important;
+    padding-bottom: 3rem !important;
+    max-width: 1400px;
+}
+
+/* ------------------------------------------------------ 3. Typographie */
+.main-title, h1 {
+    position: relative;
+    color: var(--ink) !important;
+    font-weight: 700;
+    font-size: 2rem;
+    letter-spacing: -0.02em;
+    text-align: left;
+    margin: 0 0 .4rem 0;
+    padding: 0 0 .85rem 0;
+    border-bottom: 1px solid var(--border);
+}
+
+/* Filet d'accent sous le titre : signature visuelle */
+.main-title::after, h1::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    bottom: -1px;
+    width: 72px;
+    height: 3px;
+    background: var(--accent);
+    border-radius: 2px;
+}
+
+h2 {
+    color: var(--ink) !important;
+    font-weight: 600;
+    font-size: 1.3rem;
+    letter-spacing: -0.01em;
+    margin: 2rem 0 .75rem 0;
+    padding: 0;
+    border: none;
+}
+
+/* st.subheader : petite barre d'accent pour rythmer la page */
+h3 {
+    color: var(--ink) !important;
+    font-weight: 600;
+    font-size: 1.02rem;
+    text-align: left;
+    margin: 1.7rem 0 .65rem 0;
+    padding-left: .6rem;
+    border-left: 3px solid var(--accent);
+}
+
+h4 {
+    color: var(--ink) !important;
+    font-weight: 600;
+    font-size: 1rem;
+    margin: 0 0 .5rem 0;
+}
+
+p, li {
+    color: var(--muted) !important;
+    font-weight: 400;
+    font-size: .95rem;
+    line-height: 1.65;
+    text-align: left;
+    margin: .5rem 0;
+}
+
+a { color: var(--accent); text-underline-offset: 2px; }
+
+.subheader {
+    color: var(--faint) !important;
+    font-weight: 400 !important;
+    font-size: 1rem !important;
+    text-align: left !important;
+    margin: 0 0 1.6rem 0 !important;
+}
+
+.green-underline {
+    color: var(--accent) !important;
+    font-weight: 600;
+    text-decoration: none;
+    border-bottom: 1.5px solid var(--accent-soft);
+}
+
+/* ----------------------------------- 4. Rail de navigation (sidebar) */
+section[data-testid="stSidebar"], .stSidebar {
+    background: linear-gradient(180deg, var(--nav-bg-top) 0%, var(--nav-bg-bottom) 100%) !important;
+    border-right: none !important;
+    box-shadow: 2px 0 18px rgba(10, 25, 35, .18);
+}
+
+section[data-testid="stSidebar"] .block-container { padding-top: 1.75rem !important; }
+
+section[data-testid="stSidebar"] h1,
+section[data-testid="stSidebar"] h2,
+section[data-testid="stSidebar"] h3 {
+    color: #ffffff !important;
+    font-size: .74rem !important;
+    font-weight: 700 !important;
+    text-transform: uppercase;
+    letter-spacing: .09em;
+    text-align: left !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 1.4rem 0 .6rem 0 !important;
+}
+section[data-testid="stSidebar"] h1::after,
+section[data-testid="stSidebar"] h3::after { display: none; }
+
+section[data-testid="stSidebar"] hr {
+    border-color: rgba(255, 255, 255, .10) !important;
+    margin: 1.1rem 0 !important;
+}
+
+section[data-testid="stSidebar"] p,
+section[data-testid="stSidebar"] label,
+section[data-testid="stSidebar"] span,
+section[data-testid="stSidebar"] div {
+    color: var(--nav-ink) !important;
+    font-size: .9rem;
+}
+
+/* Libellé « Sélectionnez une page » / « Fenêtre d'affichage » */
+section[data-testid="stSidebar"] .stRadio > label p {
+    color: var(--nav-ink-dim) !important;
+    font-size: .78rem !important;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+}
+
+section[data-testid="stSidebar"] .stRadio > div {
+    background: transparent;
+    padding: 0;
+    box-shadow: none;
+    gap: 3px;
+}
+
+section[data-testid="stSidebar"] .stRadio label {
+    display: flex;
+    align-items: center;
+    padding: .55rem .75rem !important;
+    border-radius: 9px;
+    margin-bottom: 3px;
+    font-weight: 500;
+    transition: background .15s ease, transform .15s ease;
+}
+
+section[data-testid="stSidebar"] .stRadio label:hover {
+    background: rgba(255, 255, 255, .07);
+}
+
+section[data-testid="stSidebar"] .stRadio label:has(input:checked) {
+    background: var(--accent);
+    box-shadow: 0 2px 10px rgba(14, 116, 144, .45);
+}
+section[data-testid="stSidebar"] .stRadio label:has(input:checked),
+section[data-testid="stSidebar"] .stRadio label:has(input:checked) * {
+    color: #ffffff !important;
+    font-weight: 600;
+}
+
+/* ----------------------------------------------------------- 5. Cartes */
+.card {
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius) !important;
+    padding: 20px 22px !important;
+    margin: 10px 0 !important;
+    box-shadow: var(--shadow-sm) !important;
+    transition: box-shadow .18s ease, border-color .18s ease !important;
+}
+
+.card:hover {
+    box-shadow: var(--shadow-md) !important;
+    border-color: #c9d6e2 !important;
+}
+
+.card h4 {
+    color: var(--ink) !important;
+    text-align: left !important;
+    font-size: 1rem !important;
+    font-weight: 600 !important;
+    margin-bottom: .6rem !important;
+}
+
+.card p, .card li {
+    color: var(--description-color) !important;
+    font-size: .93rem !important;
+    font-weight: 400 !important;
+    text-align: left !important;
+    line-height: 1.65 !important;
+    margin: .35rem 0 !important;
+}
+
+.card ol, .card ul {
+    padding-left: 1.15rem !important;
+    margin: .25rem 0 !important;
+}
+
+/* --------------------------------------------------------- 6. Graphes */
+[data-testid="stPlotlyChart"] {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 8px 4px 8px;
+    box-shadow: var(--shadow-sm);
+    margin-bottom: .5rem;
+}
+
+/* --------------------------------------------------------- 7. Boutons */
+.stButton > button {
+    background: var(--accent) !important;
+    color: #fff !important;
+    border: 1px solid var(--accent) !important;
+    border-radius: 8px !important;
+    padding: .5rem 1.1rem !important;
+    font-weight: 600 !important;
+    font-size: .9rem !important;
+    text-transform: none !important;
+    letter-spacing: 0 !important;
+    box-shadow: 0 2px 8px rgba(14, 116, 144, .25) !important;
+    transition: background .15s ease !important;
+}
+
+.stButton > button:hover {
+    background: var(--accent-strong) !important;
+    border-color: var(--accent-strong) !important;
+    transform: none !important;
+}
+
+.stButton > button:disabled {
+    background: #eef2f6 !important;
+    color: var(--faint) !important;
+    border-color: var(--border) !important;
+    box-shadow: none !important;
+    cursor: not-allowed !important;
+}
+
+.prev-button button, .next-button button {
+    width: 100% !important;
+    background: var(--surface) !important;
+    color: var(--accent) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 8px !important;
+    font-weight: 600 !important;
+    padding: .6rem !important;
+    box-shadow: var(--shadow-sm) !important;
+}
+
+.prev-button button:hover, .next-button button:hover {
+    background: var(--accent-soft) !important;
+    border-color: var(--accent) !important;
+    color: var(--accent-strong) !important;
+}
+
+/* ------------------------------------------------------ 8. Pied de page */
+.footer {
+    background: transparent !important;
+    border: none !important;
+    border-top: 1px solid var(--border) !important;
+    border-radius: 0 !important;
+    padding: 1.25rem 0 0 0 !important;
+    margin-top: 2.5rem !important;
+    box-shadow: none !important;
+}
+
+.footer .page-indicator {
+    font-size: .85rem !important;
+    color: var(--faint) !important;
+    text-align: center !important;
+    margin-bottom: .75rem !important;
+}
+
+.footer .page-indicator strong { color: var(--accent) !important; }
+
+/* --------------------------------------------------------- 9. Widgets */
+.stSelectbox > div[data-baseweb="select"],
+.stTextInput > div > div,
+.stNumberInput > div > div,
+.stDateInput > div > div {
+    border-radius: 8px !important;
+    border: 1px solid var(--border) !important;
+    background: var(--surface) !important;
+    transition: border-color .15s ease, box-shadow .15s ease !important;
+}
+
+.stSelectbox > div[data-baseweb="select"]:focus-within,
+.stTextInput > div > div:focus-within,
+.stNumberInput > div > div:focus-within,
+.stDateInput > div > div:focus-within {
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 3px rgba(14, 116, 144, .14) !important;
+}
+
+/* ------------------------------------------------- 10. Tables & alertes */
+[data-testid="stDataFrame"] {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+    background: var(--surface);
+}
+
+.stAlert {
+    border-radius: 10px !important;
+    border-left-width: 4px !important;
+    padding: .9rem 1rem !important;
+    box-shadow: var(--shadow-sm) !important;
+}
+.stAlert p { font-size: .92rem !important; margin: 0 !important; }
+
+.stSuccess { background: #ecfdf3 !important; border-color: var(--good) !important; }
+.stSuccess p { color: #14532d !important; }
+
+.stInfo { background: var(--accent-soft) !important; border-color: var(--accent) !important; }
+.stInfo p { color: var(--accent-strong) !important; }
+
+.stWarning { background: #fffbeb !important; border-color: var(--warn) !important; }
+.stWarning p { color: #78350f !important; }
+
+.stError { background: #fef2f2 !important; border-color: var(--crit) !important; }
+.stError p { color: #7f1d1d !important; }
+
+/* ------------------------------------------------------- 11. Expander */
+[data-testid="stExpander"] {
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius) !important;
+    box-shadow: var(--shadow-sm);
+    background: var(--surface);
+}
+[data-testid="stExpander"] summary { font-weight: 600; color: var(--ink); }
+
+[data-testid="stCaptionContainer"] p {
+    color: var(--faint) !important;
+    font-size: .82rem !important;
+    margin-top: .25rem !important;
+}
+
+/* ------------------------------------------------------ 12. Responsive */
+@media (max-width: 900px) {
+    .main-title, h1 { font-size: 1.5rem; }
+    h2 { font-size: 1.15rem; }
+    h3 { font-size: 1rem; }
+    .card { padding: 16px !important; }
+    .block-container { padding-top: 1.5rem !important; }
+}
