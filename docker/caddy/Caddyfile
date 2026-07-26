@@ -1,0 +1,7 @@
+# Reverse-proxy public : seul point d'entrée exposé sur Internet.
+# DOMAIN vide (défaut ":80") -> simple HTTP, utile en local ou tant qu'aucun
+# domaine ne pointe vers la machine. DOMAIN défini (ex. energia.example.com)
+# -> Caddy provisionne et renouvelle seul le certificat Let's Encrypt.
+{$DOMAIN} {
+	reverse_proxy streamlit:8501
+}

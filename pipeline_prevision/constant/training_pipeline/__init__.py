@@ -14,6 +14,14 @@ from datetime import datetime, timedelta
 
 LOOKBACK: int = 36
 HORIZON: int = 1
+
+HOUR: int = 60*60
+DAY: int = 24 * HOUR
+WEEK: int = 7 * DAY
+MONTH: int = 30.5 * DAY
+YEAR: float = 365.25 * DAY
+
+
 SIX_MONTHS = timedelta(days=30*6)
 FIVE_MONTHS = timedelta(days=30*5)
 TYPE_SOURCE = ['SOLAR', 'BIOMASS', 'WIND_ONSHORE', 'NUCLEAR']

@@ -6,7 +6,7 @@
 ![Grafana](https://img.shields.io/badge/monitoring-Grafana-F46800)
 ![Docker](https://img.shields.io/badge/built%20with-Docker-2496ED)
 
-# EnergIA — Prévision et pilotage du système électrique français
+# Prévision et pilotage du système électrique français
 
 Application MLOps de prévision et d'analyse de la consommation et de la
 production électrique en France (RTE) enrichie de données météo

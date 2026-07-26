@@ -4,13 +4,19 @@ import streamlit as st
 def home():
     """Page d'accueil : présentation de l'application et guide de navigation."""
 
-    # --- Titre + sous-titre ---
+    # --- Titre + sous-titre (centrés sur cette page uniquement) ---
     st.markdown(
-        "<h1 class='main-title'>EnergIA — Pilotage énergétique</h1>",
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        "<p class='subheader'>Prévision et analyse du système électrique français</p>",
+        """
+        <style>
+        .home-hero .main-title { text-align: center !important; }
+        .home-hero .main-title::after { left: 50% !important; transform: translateX(-50%); }
+        .home-hero .subheader { text-align: center !important; }
+        </style>
+        <div class="home-hero">
+            <h1 class='main-title'> Prévision et Pilotage Energétique (PPE)</h1>
+            <p class='subheader'>Prévision et analyse du système électrique français</p>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
 

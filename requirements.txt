@@ -5,8 +5,8 @@ numpy==2.5.1
 matplotlib==3.11.1
 plotly==6.9.0
 scikit-learn==1.9.0
-xgboost==3.3.0
 lightgbm==4.7.0
+optuna==4.9.0
 meteostat==2.1.4
 dill==0.4.1
 PyYAML==6.0.3
@@ -19,8 +19,8 @@ requests==2.34.2
 statsmodels==0.14.6
 scipy==1.18.0
 scikit-optimize==0.10.2
-hyperopt==0.2.7
-# hyperopt importe pkg_resources, retiré de setuptools>=81.
+# setuptools épinglé pour d'anciennes dépendances sensibles à pkg_resources
+# (retiré de setuptools>=81).
 setuptools==80.10.2
 SQLAlchemy==2.0.51
 psycopg2-binary==2.9.12

@@ -10,7 +10,7 @@ from consumption_page import consumption
 from production_page import production
 from forecast_page import forecast
 from model_page import model_performance
-from pipelines_page import pipelines
+from session_config import SessionConfig
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
@@ -69,6 +69,8 @@ class MultipageApp:
 
     def run(self):
         """ Affiche la page sélectionnée dans la barre latérale et ajoute un pied de page avec navigation"""
+
+        SessionConfig.initialize_all()
 
         # Initialisation de l'index de page dans la session state si nécessaire
         if "page_index" not in st.session_state:
@@ -156,5 +158,4 @@ app.add_page("Analyse Consommation", consumption)
 app.add_page("Analyse Production", production)
 app.add_page("Prévisions", forecast)
 app.add_page("Performance modèle", model_performance)
-app.add_page("Pipelines", pipelines)
 app.run()

@@ -6,24 +6,13 @@ import plotly.graph_objects as go
 import streamlit as st
 
 import data as D
+from kpi_card import kpi_card, windowed_delta
+from session_config import SessionConfig, create_radio_widget
 
 _PLOT = dict(template="plotly_white", margin=dict(l=10, r=10, t=40, b=10))
 _C = "#e74c3c"  # couleur consommation
 _DAYS_FR = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
 _MONTHS_FR = ["Jan", "Fév", "Mar", "Avr", "Mai", "Jun", "Jul", "Aoû", "Sep", "Oct", "Nov", "Déc"]
-
-
-def _kpi_card(label, value, sub=""):
-    st.markdown(
-        f"""
-        <div class="card" style="text-align:center; padding:16px 10px;">
-            <div style="font-size:0.78rem; color:var(--faint); text-transform:uppercase; letter-spacing:0.3px; min-height:2.4em; display:flex; align-items:center; justify-content:center; line-height:1.2;">{label}</div>
-            <div style="font-size:1.4rem; font-weight:700; color:var(--accent); margin-top:4px; white-space:nowrap;">{value}</div>
-            <div style="font-size:0.76rem; color:var(--faint); margin-top:2px;">{sub}&nbsp;</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
 
 @st.cache_data(ttl=60)
@@ -35,11 +24,10 @@ def _window_filter(obs_all):
     max_ts = obs_all.index.max()
     with st.sidebar:
         st.markdown("### Période")
-        choice = st.radio("Fenêtre d'affichage",
-                          ["30 derniers jours", "7 derniers jours"],
-                          index=0, key="conso_period")
+        choice = create_radio_widget("Fenêtre d'affichage", SessionConfig.WINDOWS_DATA_DISPLAY,
+                                     session_key="period_window", widget_key="conso_period")
     days = 30 if choice.startswith("30") else 7
-    return obs_all[obs_all.index >= max_ts - pd.Timedelta(days=days)]
+    return obs_all[obs_all.index >= max_ts - pd.Timedelta(days=days)], days
 
 
 def consumption():
@@ -50,7 +38,8 @@ def consumption():
         st.info("Aucune donnée de consommation en base.")
         return
 
-    obs = _window_filter(obs_all).sort_index()
+    obs, days = _window_filter(obs_all)
+    obs = obs.sort_index()
     conso = obs["consommation_totale"].dropna()
     if conso.empty:
         st.info("Aucune donnée sur la fenêtre sélectionnée.")
@@ -66,17 +55,24 @@ def consumption():
             corr = float(joint["temp"].corr(joint["consommation_totale"]))
 
     peak_ts = conso.idxmax()
+    avg_conso, avg_delta = windowed_delta(obs_all, "consommation_totale", days)
+    _, peak_delta = windowed_delta(obs_all, "consommation_totale", days, agg="max")
+    _, base_delta = windowed_delta(obs_all, "consommation_totale", days, agg="min")
+
     k1, k2, k3, k4, k5 = st.columns(5)
     with k1:
-        _kpi_card("Consommation moy.", f"{conso.mean():,.0f} MW".replace(",", " "))
+        kpi_card("Consommation moy.", f"{avg_conso:,.0f} MW".replace(",", " "),
+                 delta_pct=avg_delta, higher_is_better=False)
     with k2:
-        _kpi_card("Pic", f"{conso.max():,.0f} MW".replace(",", " "), sub=peak_ts.strftime("%d/%m %Hh"))
+        kpi_card("Pic", f"{conso.max():,.0f} MW".replace(",", " "), delta_pct=peak_delta,
+                 sub=peak_ts.strftime("%d/%m %Hh"), higher_is_better=False)
     with k3:
-        _kpi_card("Base (min)", f"{conso.min():,.0f} MW".replace(",", " "))
+        kpi_card("Base (min)", f"{conso.min():,.0f} MW".replace(",", " "), delta_pct=base_delta,
+                 higher_is_better=False)
     with k4:
-        _kpi_card("Thermosensibilité", f"{slope:+.0f} MW/°C" if pd.notna(slope) else "—")
+        kpi_card("Thermosensibilité", f"{slope:+.0f} MW/°C" if pd.notna(slope) else "—")
     with k5:
-        _kpi_card("Corrélation temp.", f"r = {corr:.2f}" if pd.notna(corr) else "—")
+        kpi_card("Corrélation temp.", f"r = {corr:.2f}" if pd.notna(corr) else "—")
 
     st.markdown("<br>", unsafe_allow_html=True)
 

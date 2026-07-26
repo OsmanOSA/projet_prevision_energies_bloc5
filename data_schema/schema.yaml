@@ -1,24 +1,31 @@
 columns:
-  - BIOMASS: float64
-  - NUCLEAR: float64
-  - SOLAR: float64
-  - WIND_ONSHORE: float64
+  - production_total: float64
   - consommation_totale: float64
   - temp: float64
+  - SOLAR: float64
+  - BIOMASS: float64
+  - WIND_ONSHORE: float64
+  - NUCLEAR: float64
 
 numeric_columns:
-  - BIOMASS
-  - NUCLEAR
-  - SOLAR
-  - WIND_ONSHORE
+  - production_total
   - consommation_totale
   - temp
+  - SOLAR
+  - BIOMASS
+  - WIND_ONSHORE
+  - NUCLEAR
 # Bornes de contrôle métier : un dépassement déclenche une alerte traçable mais
 # ne modifie jamais silencieusement la donnée historique.
+# temp : variable exogène (entrée seule, jamais prédite) -- cf. model_trainer.py.
+# SOLAR/BIOMASS/WIND_ONSHORE/NUCLEAR : les 4 sources qui composent
+# production_total -- conservées à part pour une future décomposition
+# (cf. discussion), pas encore utilisées comme cibles par model_trainer.py.
 plausible_bounds:
   temp: {min: -30, max: 50}
-  SOLAR: {min: 0, max: 25000}
-  BIOMASS: {min: 0, max: 1000}
-  WIND_ONSHORE: {min: 0, max: 30000}
-  NUCLEAR: {min: 0, max: 70000}
+  production_total: {min: 0, max: 100000}
   consommation_totale: {min: 0, max: 120000}
+  SOLAR: {min: 0, max: 25000}
+  BIOMASS: {min: 0, max: 2000}
+  WIND_ONSHORE: {min: 0, max: 20000}
+  NUCLEAR: {min: 20000, max: 65000}

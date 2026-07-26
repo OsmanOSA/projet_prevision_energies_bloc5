@@ -2,6 +2,11 @@
 
 Pickle artifacts are loaded only from the trusted local MODEL_DIR. Do not mount
 model artifacts received from untrusted users.
+
+Not used by the current Streamlit dashboard (which calls
+`local_forecaster.py` directly) — kept for external API consumers, updated
+here for consistency with the direct multi-horizon residual architecture
+(cf. pipeline_prevision/utils/main_utils/feature_engineering.py).
 """
 
 from __future__ import annotations
@@ -9,22 +14,18 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from io import BytesIO
 
-import numpy as np
 import pandas as pd
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from pipeline_prevision.exception.exception import ForecastingException
-from pipeline_prevision.utils.main_utils.utils import load_object
-from pipeline_prevision.utils.ml_utils.metric.forecasting_metric import (
-    get_forecast_score,
-)
-from pipeline_prevision.utils.ml_utils.model.estimator import ForecastModel
 from pipeline_prevision.utils.ml_utils.model.local_forecaster import (
+    TARGETS,
+    HORIZON_MAX,
     get_model_version,
+    predict_with_conformal_intervals,
 )
 
 os.environ["GIT_PYTHON_REFRESH"] = "quiet"
@@ -32,12 +33,9 @@ os.environ["GIT_PYTHON_REFRESH"] = "quiet"
 LOGGER = logging.getLogger(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_DIR = os.getenv("MODEL_DIR", os.path.join(BASE_DIR, "final_models"))
-FEATURE_COUNT = 6
-LOOKBACK = 36
-MAX_FUTURE_HOURS = 168
-MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+MIN_HISTORY_HOURS = 340  # marge au-delà du plus grand lag utilisé (336h)
 
-app = FastAPI(title="Energy Forecasting API", version="1.1.0")
+app = FastAPI(title="Energy Forecasting API", version="2.0.0")
 
 cors_origins = [
     value.strip()
@@ -55,51 +53,18 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization"],
 )
 
-model_cache: dict[str, ForecastModel] = {}
+
+class Observation(BaseModel):
+    timestamp: str
+    production_total: float
+    consommation_totale: float
+    temp: float
 
 
-class PredictionMultiStep(BaseModel):
-    data: list[list[float]]
-    n_future: int = Field(ge=1, le=MAX_FUTURE_HOURS)
-
-
-def get_forecast_model() -> ForecastModel:
-    """Lazy-load the champion from the trusted local artifact directory."""
-    try:
-        if "forecast_model" not in model_cache:
-            preprocessor_path = os.path.join(MODEL_DIR, "preprocessor.pkl")
-            model_path = os.path.join(MODEL_DIR, "model.pkl")
-            if not os.path.isfile(preprocessor_path) or not os.path.isfile(model_path):
-                raise FileNotFoundError(
-                    "Champion artifacts are missing from the configured MODEL_DIR"
-                )
-            preprocessor = load_object(preprocessor_path)
-            final_model = load_object(model_path)
-            model_cache["forecast_model"] = ForecastModel(
-                preprocessor=preprocessor,
-                model=final_model,
-            )
-            LOGGER.info("Forecast champion loaded: %s", get_model_version())
-        return model_cache["forecast_model"]
-    except ForecastingException:
-        raise
-    except Exception as exc:
-        raise ForecastingException(exc, sys) from exc
-
-
-def _validate_feature_rows(data: list[list[float]]) -> None:
-    if len(data) < LOOKBACK:
-        raise HTTPException(
-            status_code=422,
-            detail=f"At least {LOOKBACK} hourly rows are required",
-        )
-    if any(len(row) != FEATURE_COUNT for row in data):
-        raise HTTPException(
-            status_code=422,
-            detail=f"Every row must contain exactly {FEATURE_COUNT} features",
-        )
-    if not np.isfinite(np.asarray(data, dtype=float)).all():
-        raise HTTPException(status_code=422, detail="Input contains NaN or infinity")
+class PredictionRequest(BaseModel):
+    observations: list[Observation] = Field(min_length=MIN_HISTORY_HOURS)
+    target: str
+    horizons: list[int] | None = None
 
 
 @app.get("/", tags=["service"])
@@ -109,12 +74,11 @@ async def index():
 
 @app.get("/health", tags=["service"])
 async def health():
-    required = ["model.pkl", "preprocessor.pkl"]
-    missing = [name for name in required if not os.path.isfile(os.path.join(MODEL_DIR, name))]
-    if missing:
+    model_path = os.path.join(MODEL_DIR, "model.pkl")
+    if not os.path.isfile(model_path):
         raise HTTPException(
             status_code=503,
-            detail={"status": "not_ready", "missing_artifacts": missing},
+            detail={"status": "not_ready", "missing_artifacts": ["model.pkl"]},
         )
     return {"status": "ready", "model_version": get_model_version()}
 
@@ -126,69 +90,39 @@ async def api_docs():
     return RedirectResponse(url="/docs")
 
 
-@app.post("/predict_batches", tags=["prediction"])
-@app.post("/predict_batchs", tags=["prediction"], deprecated=True)
-async def predict_batch(file: UploadFile = File(...)):
-    try:
-        payload = await file.read(MAX_UPLOAD_BYTES + 1)
-        if len(payload) > MAX_UPLOAD_BYTES:
-            raise HTTPException(status_code=413, detail="Uploaded CSV exceeds 10 MiB")
+@app.post("/predict", tags=["prediction"])
+async def prediction(payload: PredictionRequest):
+    if payload.target not in TARGETS:
+        raise HTTPException(status_code=422, detail=f"target doit être l'un de {TARGETS}")
+    horizons = payload.horizons or list(range(1, HORIZON_MAX + 1))
+    if any(h < 1 or h > HORIZON_MAX for h in horizons):
+        raise HTTPException(status_code=422, detail=f"horizons doit être entre 1 et {HORIZON_MAX}")
 
-        test = pd.read_csv(
-            BytesIO(payload),
-            sep=None,
-            engine="python",
-            parse_dates=[0],
-            index_col=0,
-        )
-        forecast_model = get_forecast_model()
-        y_pred, y_test = forecast_model.predict(x=test)
-        forecast_metric = get_forecast_score(y_true=y_test, y_pred=y_pred)
+    try:
+        observations = pd.DataFrame([o.model_dump() for o in payload.observations])
+        observations["timestamp"] = pd.to_datetime(observations["timestamp"])
+        observations = observations.set_index("timestamp").sort_index()
+
+        result = predict_with_conformal_intervals(observations, payload.target, horizons=horizons)
         return {
-            "MAE": float(forecast_metric.mae),
-            "MSE": float(forecast_metric.mse),
-            "rows_predicted": int(len(y_pred)),
+            "target": payload.target,
             "model_version": get_model_version(),
-        }
-    except HTTPException:
-        raise
-    except Exception as exc:
-        LOGGER.exception("Batch prediction failed")
-        raise HTTPException(status_code=422, detail="Invalid batch prediction input") from exc
-
-
-@app.post("/predict_multistep", tags=["prediction"])
-async def prediction(payload: PredictionMultiStep):
-    _validate_feature_rows(payload.data)
-    try:
-        forecast_model = get_forecast_model()
-        y_pred, y_test = forecast_model.predict_multistep(
-            x=payload.data,
-            n_futur=payload.n_future,
-        )
-
-        response = {
-            "Pred": np.asarray(y_pred).tolist(),
-            "Test": None,
-            "MAE": None,
-            "MSE": None,
-            "model_version": get_model_version(),
-        }
-        if y_test is not None:
-            forecast_metric = get_forecast_score(y_true=y_test, y_pred=y_pred)
-            response.update(
+            "forecast": [
                 {
-                    "Test": np.asarray(y_test).tolist(),
-                    "MAE": float(forecast_metric.mae),
-                    "MSE": float(forecast_metric.mse),
+                    "target_ts": ts.isoformat(),
+                    "horizon_h": int(row["horizon_h"]),
+                    "y_pred": float(row["y_pred"]),
+                    "y_lower": float(row["y_lower"]) if pd.notna(row["y_lower"]) else None,
+                    "y_upper": float(row["y_upper"]) if pd.notna(row["y_upper"]) else None,
                 }
-            )
-        return response
+                for ts, row in result.iterrows()
+            ],
+        }
     except ForecastingException as exc:
         LOGGER.exception("Champion inference failed")
         raise HTTPException(status_code=503, detail="Model inference unavailable") from exc
     except Exception as exc:
-        LOGGER.exception("Multistep prediction failed")
+        LOGGER.exception("Prediction failed")
         raise HTTPException(status_code=422, detail="Invalid prediction input") from exc
 
 

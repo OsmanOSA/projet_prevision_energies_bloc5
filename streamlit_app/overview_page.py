@@ -1,5 +1,7 @@
 """Page « Vue d'ensemble » — synthèse façon Power BI (KPI + analyses clés)."""
 
+import json
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -7,21 +9,17 @@ from plotly.subplots import make_subplots
 import streamlit as st
 
 import data as D
+from kpi_card import kpi_card, windowed_delta
+from session_config import SessionConfig, create_radio_widget
+
+_SOURCE_LABELS = {
+    "SOLAR": "Solaire",
+    "BIOMASS": "Biomasse",
+    "WIND_ONSHORE": "Éolien terrestre",
+    "NUCLEAR": "Nucléaire",
+}
 
 _PLOT = dict(template="plotly_white", margin=dict(l=10, r=10, t=40, b=10))
-
-
-def _kpi_card(label, value, sub=""):
-    st.markdown(
-        f"""
-        <div class="card" style="text-align:center; padding:16px 10px;">
-            <div style="font-size:0.78rem; color:var(--faint); text-transform:uppercase; letter-spacing:0.3px; min-height:2.4em; display:flex; align-items:center; justify-content:center; line-height:1.2;">{label}</div>
-            <div style="font-size:1.4rem; font-weight:700; color:var(--accent); margin-top:4px; white-space:nowrap;">{value}</div>
-            <div style="font-size:0.76rem; color:var(--faint); margin-top:2px;">{sub}&nbsp;</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
 
 @st.cache_data(ttl=60)
@@ -34,12 +32,12 @@ def _period_filter(obs_all):
     max_ts = obs_all.index.max()
     with st.sidebar:
         st.markdown("### Période")
-        choice = st.radio("Fenêtre d'affichage", ["7 derniers jours", "30 derniers jours"],
-                          index=0, key="ov_period")
+        choice = create_radio_widget("Fenêtre d'affichage", SessionConfig.WINDOWS_DATA_DISPLAY,
+                                     session_key="period_window", widget_key="ov_period")
     days = 7 if choice.startswith("7") else 30
     start = max_ts - pd.Timedelta(days=days)
     end = max_ts + pd.Timedelta(hours=1)
-    return start, end
+    return start, end, days
 
 
 def overview():
@@ -50,121 +48,138 @@ def overview():
         st.info("Aucune donnée en base. Lancez l'ingestion (DAG ingest_hourly).")
         return
 
-    start, end = _period_filter(obs_all)
+    start, end, days = _period_filter(obs_all)
     obs = _load(start, end)
     if obs.empty:
         st.info("Aucune donnée sur la période sélectionnée.")
         return
 
-    prod_cols = [c for c in D.PRODUCTION_SOURCES if c in obs.columns]
+    has_prod = "production_total" in obs.columns
     has_conso = "consommation_totale" in obs.columns
-    prod_total = obs[prod_cols].sum(axis=1) if prod_cols else None
+    prod_total = obs["production_total"] if has_prod else None
 
     # ------------------------------------------------------------------ KPI
-    avg_conso = obs["consommation_totale"].mean() if has_conso else np.nan
     peak_conso = obs["consommation_totale"].max() if has_conso else np.nan
     peak_hour = obs["consommation_totale"].idxmax() if has_conso else None
-    avg_temp = obs["temp"].mean() if "temp" in obs.columns else np.nan
-    avg_prod = prod_total.mean() if prod_total is not None else np.nan
+    peak_prod = prod_total.max() if has_prod else np.nan
+    peak_prod_hour = prod_total.idxmax() if has_prod else None
 
-    renew_share = np.nan
-    if prod_cols:
-        renew_cols = [c for c in prod_cols if c != "NUCLEAR"]
-        denom = obs[prod_cols].sum().sum()
-        renew_share = 100 * obs[renew_cols].sum().sum() / denom if denom else np.nan
+    deficit_mw = np.nan
+    if has_prod and has_conso:
+        deficit_mw = (prod_total - obs["consommation_totale"]).mean()
 
-    deficit_gw = np.nan
-    pct_deficit = np.nan
-    if prod_total is not None and has_conso:
-        deficit = prod_total - obs["consommation_totale"]
-        deficit_gw = deficit.mean() / 1000.0
-        pct_deficit = 100 * (deficit < 0).mean()
+    avg_conso, conso_delta = windowed_delta(obs_all, "consommation_totale", days)
+    avg_prod, prod_delta = windowed_delta(obs_all, "production_total", days)
+    _, peak_conso_delta = windowed_delta(obs_all, "consommation_totale", days, agg="max")
+    _, peak_prod_delta = windowed_delta(obs_all, "production_total", days, agg="max")
 
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1, c2, c3, c4, c5 = st.columns(5)
     with c1:
-        _kpi_card("Consommation moy.", f"{avg_conso:,.0f} MW".replace(",", " ") if pd.notna(avg_conso) else "—")
+        kpi_card("Consommation moy.", f"{avg_conso/1000:,.2f} GW" if pd.notna(avg_conso) else "—",
+                 delta_pct=conso_delta, higher_is_better=False)
     with c2:
-        _kpi_card("Pic de conso.", f"{peak_conso:,.0f} MW".replace(",", " ") if pd.notna(peak_conso) else "—",
-                  sub=peak_hour.strftime("%d/%m %Hh") if peak_hour is not None else "")
+        kpi_card("Pic de conso.", f"{peak_conso/1000:,.2f} GW" if pd.notna(peak_conso) else "—",
+                 delta_pct=peak_conso_delta, higher_is_better=False,
+                 sub=peak_hour.strftime("%d/%m %Hh") if peak_hour is not None else "")
     with c3:
-        _kpi_card("Production suivie moy.", f"{avg_prod:,.0f} MW".replace(",", " ") if pd.notna(avg_prod) else "—")
+        kpi_card("Production suivie moy.", f"{avg_prod/1000:,.2f} GW" if pd.notna(avg_prod) else "—",
+                 delta_pct=prod_delta)
     with c4:
-        _kpi_card("Part renouvelable", f"{renew_share:.0f} %" if pd.notna(renew_share) else "—",
-                  sub="hors nucléaire")
+        kpi_card("Pic de production", f"{peak_prod/1000:,.2f} GW" if pd.notna(peak_prod) else "—",
+                 delta_pct=peak_prod_delta,
+                 sub=peak_prod_hour.strftime("%d/%m %Hh") if peak_prod_hour is not None else "")
     with c5:
-        _kpi_card("Écart moyen (partiel)", f"{deficit_gw:+.2f} GW" if pd.notna(deficit_gw) else "—",
-                  sub="4 sources − conso")
-    with c6:
-        _kpi_card("Heures sous consommation", f"{pct_deficit:.0f} %" if pd.notna(pct_deficit) else "—")
+        kpi_card("Écart moyen (partiel)",
+                 f"{deficit_mw/1000:+,.2f} GW" if pd.notna(deficit_mw) else "—")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ----------------------------------------------- Conso vs prod + mix
-    left, right = st.columns([3, 2])
-    with left:
-        st.subheader("Consommation vs production suivie")
+    # ----------------------------------------------------- Conso vs production
+    col_line, col_bar = st.columns(2)
+    with col_line:
+        st.subheader(
+            "Consommation vs production suivie",
+            help=(
+                "Production suivie = somme solaire + biomasse + éolien terrestre + "
+                "nucléaire. L'hydraulique, le thermique fossile, les échanges et les "
+                "pertes réseau ne sont pas disponibles ; l'écart affiché n'est donc pas "
+                "le solde électrique national."
+            ),
+        )
         # Réindexation horaire continue : les heures manquantes deviennent NaN,
         # ce qui casse la ligne au lieu de relier les blocs par une droite fictive.
         obs_line = obs.reindex(pd.date_range(obs.index.min(), obs.index.max(), freq="h"))
-        prod_line = obs_line[prod_cols].sum(axis=1, min_count=1) if prod_cols else None
         fig = go.Figure()
         if has_conso:
-            fig.add_trace(go.Scatter(x=obs_line.index, y=obs_line["consommation_totale"], name="Consommation",
+            fig.add_trace(go.Scatter(x=obs_line.index, y=obs_line["consommation_totale"] / 1000, name="Consommation",
                                      line=dict(color="#e74c3c", width=2), connectgaps=False))
-        if prod_line is not None:
-            fig.add_trace(go.Scatter(x=obs_line.index, y=prod_line, name="Production suivie (4 sources)",
-                                     line=dict(color="#27ae60", width=2), fill="tozeroy",
-                                     fillcolor="rgba(39,174,96,0.08)", connectgaps=False))
-        fig.update_layout(height=360, yaxis_title="MW",
+        if has_prod:
+            fig.add_trace(go.Scatter(x=obs_line.index, y=obs_line["production_total"] / 1000, name="Production suivie",
+                                     line=dict(color="#27ae60", width=2), connectgaps=False))
+        fig.update_layout(height=360, yaxis=dict(title="GW", range=[0, 70], dtick=20),
                           legend=dict(orientation="h", y=1.02), **_PLOT)
         st.plotly_chart(fig, width="stretch")
-    with right:
-        st.subheader("Mix de production")
-        if prod_cols:
-            means = obs[prod_cols].mean()
-            figp = go.Figure(go.Pie(labels=means.index, values=means.values, hole=0.55,
-                                    marker=dict(colors=[D.ENERGY_COLORS.get(s, "#888") for s in means.index]),
-                                    textinfo="percent"))
-            figp.update_layout(height=360, legend=dict(orientation="h", y=-0.1), **_PLOT)
-            st.plotly_chart(figp, width="stretch")
-
-    st.caption(
-        "Périmètre de production suivi : solaire, biomasse, éolien terrestre et "
-        "nucléaire. L'hydraulique, le thermique fossile, les échanges et les "
-        "pertes réseau ne sont pas disponibles ; l'écart affiché n'est donc pas "
-        "le solde électrique national."
-    )
 
     # ------------------------------------------------------ Écart journalier
-    if prod_total is not None and has_conso:
-        st.subheader("Écart production suivie − consommation (journalier)")
-        daily = (prod_total - obs["consommation_totale"]).resample("D").mean() / 1000.0
-        colors = ["#2ecc71" if v >= 0 else "#e74c3c" for v in daily]
-        figd = go.Figure(go.Bar(x=daily.index, y=daily.values, marker_color=colors,
-                                marker_line=dict(color="rgba(0,0,0,0.15)", width=1)))
-        figd.add_hline(y=0, line_dash="dash", line_color="gray",
-                       annotation_text="Équilibre", annotation_position="bottom right")
-        figd.update_layout(height=300, yaxis_title="Écart partiel (GW)", **_PLOT)
-        st.plotly_chart(figd, width="stretch")
+    if has_prod and has_conso:
+        with col_bar:
+            st.subheader("Evolution du déficit (PROD - CONSO)")
+            daily = (prod_total - obs["consommation_totale"]).resample("D").mean() / 1000.0
+            colors = ["#2ecc71" if v >= 0 else "#e74c3c" for v in daily]
+            figd = go.Figure(go.Bar(x=daily.index, y=daily.values, marker_color=colors,
+                                    marker_line=dict(color="rgba(0,0,0,0.15)", width=1)))
+            figd.add_hline(y=0, line_dash="dash", line_color="gray",
+                           annotation_text="Équilibre", annotation_position="bottom right")
+            figd.update_layout(height=360, yaxis_title="Écart partiel (GW)", **_PLOT)
+            st.plotly_chart(figd, width="stretch")
 
-    # ------------------------------------------- Production mensuelle empilée
-    if prod_cols:
-        st.subheader("Production mensuelle par source")
-        monthly = obs[prod_cols].copy()
-        monthly["mois"] = monthly.index.to_period("M").astype(str)
-        agg = monthly.groupby("mois")[prod_cols].sum().reset_index()
-        figm = go.Figure()
-        for src in prod_cols:
-            figm.add_trace(go.Bar(x=agg["mois"], y=agg[src], name=src,
-                                  marker_color=D.ENERGY_COLORS.get(src, "#888")))
-        figm.update_layout(barmode="stack", height=330, yaxis_title="Production (MWh)",
-                           xaxis_title="Mois", legend=dict(orientation="h", y=1.02),
-                           xaxis=dict(tickangle=-45), **_PLOT)
-        st.plotly_chart(figm, width="stretch")
+    # ------------------------------------------------- Répartition production
+    if all(c in obs.columns for c in D.PRODUCTION_SOURCES):
+        st.subheader("Répartition de la production suivie par source")
+        source_means = {s: float(obs[s].mean()) / 1000.0 for s in D.PRODUCTION_SOURCES}  # GW, cohérent avec le reste de la page
+        pie_data = [
+            {
+                "name": _SOURCE_LABELS[source],
+                "value": round(value, 2),
+                "itemStyle": {"color": D.ENERGY_COLORS.get(source, "#999999")},
+            }
+            for source, value in source_means.items()
+        ]
+
+        options = {
+            "tooltip": {"trigger": "item", "formatter": "{b}: {c} GW ({d}%)"},
+            "legend": {"top": "0%", "left": "center"},
+            "series": [{
+                "name": "Source",
+                "type": "pie",
+                "radius": ["37%", "63%"],
+                "center": ["50%", "58%"],
+                "itemStyle": {
+                    "borderColor": "#FFFFFF",
+                    "borderWidth": 5,
+                    "borderRadius": 11,
+                },
+                "label": {"formatter": "{b}\n{d}%"},
+                "data": pie_data,
+            }],
+        }
+
+        echarts_html = f"""
+        <div id="echarts_prod_sources" style="width:100%;height:420px;"></div>
+        <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+        <script>
+            var chartDom = document.getElementById('echarts_prod_sources');
+            var myChart = echarts.init(chartDom);
+            var option = {json.dumps(options)};
+            myChart.setOption(option);
+            window.addEventListener('resize', myChart.resize);
+        </script>
+        """
+        st.iframe(echarts_html, height=430)
 
     # ---------------------------------------------------------- Distributions
     st.subheader("Distributions des variables principales")
-    main_vars = [v for v in (["consommation_totale"] + prod_cols + ["temp"]) if v in obs.columns]
+    main_vars = [v for v in ["consommation_totale", "production_total", "temp"] if v in obs.columns]
     if main_vars:
         n = len(main_vars)
         cols = min(3, n)

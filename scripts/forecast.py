@@ -1,12 +1,13 @@
-"""Génération et persistance de la prévision J+1.
+"""Génération et persistance de la prévision multi-horizon (J+1 à J+horizon).
 
-Préfigure le futur DAG Airflow `forecast_daily` : lit les dernières séries
-observées en base, appelle le modèle de prévision (API distante), et persiste
-la prévision multi-horizon dans la table `forecasts`.
+Préfigure le DAG Airflow `forecast_daily` : lit les dernières séries
+observées en base, appelle le modèle de prévision **direct** par horizon
+(un modèle dédié par heure d'anticipation, pas de rollout autorégressif),
+et persiste la prévision dans la table `forecasts`.
 
 Usage :
     python -m scripts.forecast            # horizon 24 h par défaut
-    python -m scripts.forecast 48
+    python -m scripts.forecast 12
 """
 
 import os
@@ -25,11 +26,11 @@ from pipeline_prevision.logging.logger import logging
 from pipeline_prevision.exception.exception import ForecastingException
 from pipeline_prevision.db import get_observations, save_forecasts, log_run
 from pipeline_prevision.utils.ml_utils.model.local_forecaster import (
-    dynamic_conformal_intervals,
+    predict_with_conformal_intervals,
     get_model_version,
+    derive_production_total,
+    TARGETS,
 )
-
-FEATURES = ["temp", "SOLAR", "BIOMASS", "WIND_ONSHORE", "NUCLEAR", "consommation_totale"]
 
 
 def run(horizon: int = 24) -> int:
@@ -43,21 +44,32 @@ def run(horizon: int = 24) -> int:
 
         df = df.sort_index()
         origin_ts = pd.Timestamp(df.index[-1])
+        horizons = range(1, horizon + 1)
 
-        # Inférence locale + intervalles conformes dynamiques (~95 %)
-        y_pred, y_lower, y_upper, _y_test, _mae, _mse = dynamic_conformal_intervals(
-            df, horizon, alpha=0.05)
-        if y_pred is None or len(y_pred) == 0:
-            raise ValueError("Le modèle n'a renvoyé aucune prévision")
+        # Un jeu de 24 modèles dédiés par cible : chaque horizon est prédit
+        # directement depuis l'origine, jamais nourri par une prédiction
+        # antérieure (cf. local_forecaster.predict_with_conformal_intervals).
+        per_target = {
+            target: predict_with_conformal_intervals(df, target, horizons=horizons, alpha=0.05)
+            for target in TARGETS
+        }
 
-        future_ts = pd.date_range(
-            start=origin_ts + pd.Timedelta(1, unit="h"),
-            periods=len(y_pred),
-            freq="h",
-        )
-        pred_df = pd.DataFrame(y_pred, columns=FEATURES, index=future_ts)
-        lower_df = pd.DataFrame(y_lower, columns=FEATURES, index=future_ts)
-        upper_df = pd.DataFrame(y_upper, columns=FEATURES, index=future_ts)
+        # production_total n'est plus une cible modélisée : reconstruite en
+        # sommant les 4 sources, pour ne rien casser en aval (graphe du
+        # déficit, habitudes du dashboard) -- cf. derive_production_total.
+        derived = derive_production_total(per_target)
+        pred_df = pd.concat({
+            **{target: result["y_pred"] for target, result in per_target.items()},
+            "production_total": derived["y_pred"],
+        }, axis=1)
+        lower_df = pd.concat({
+            **{target: result["y_lower"] for target, result in per_target.items()},
+            "production_total": derived["y_lower"],
+        }, axis=1)
+        upper_df = pd.concat({
+            **{target: result["y_upper"] for target, result in per_target.items()},
+            "production_total": derived["y_upper"],
+        }, axis=1)
 
         n = save_forecasts(pred_df, origin_ts=origin_ts, model_version=get_model_version(),
                            lower_df=lower_df, upper_df=upper_df)

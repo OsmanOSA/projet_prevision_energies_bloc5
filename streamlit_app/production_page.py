@@ -1,27 +1,18 @@
-"""Page « Analyse Production » — mix, profils par source et corrélations météo."""
+"""Page « Analyse Production » — profils, saisonnalités et corrélation météo."""
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import streamlit as st
 
 import data as D
+from kpi_card import kpi_card, windowed_delta
+from session_config import SessionConfig, create_radio_widget
 
 _PLOT = dict(template="plotly_white", margin=dict(l=10, r=10, t=40, b=10))
-
-
-def _kpi_card(label, value, sub=""):
-    st.markdown(
-        f"""
-        <div class="card" style="text-align:center; padding:16px 10px;">
-            <div style="font-size:0.78rem; color:var(--faint); text-transform:uppercase; letter-spacing:0.3px; min-height:2.4em; display:flex; align-items:center; justify-content:center; line-height:1.2;">{label}</div>
-            <div style="font-size:1.4rem; font-weight:700; color:var(--accent); margin-top:4px; white-space:nowrap;">{value}</div>
-            <div style="font-size:0.76rem; color:var(--faint); margin-top:2px;">{sub}&nbsp;</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+_P = "#27ae60"  # couleur production
+_DAYS_FR = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
+_MONTHS_FR = ["Jan", "Fév", "Mar", "Avr", "Mai", "Jun", "Jul", "Aoû", "Sep", "Oct", "Nov", "Déc"]
 
 
 @st.cache_data(ttl=60)
@@ -33,113 +24,136 @@ def _window_filter(obs_all):
     max_ts = obs_all.index.max()
     with st.sidebar:
         st.markdown("### Période")
-        choice = st.radio("Fenêtre d'affichage", ["30 derniers jours", "7 derniers jours"],
-                          index=0, key="prod_period")
+        choice = create_radio_widget("Fenêtre d'affichage", SessionConfig.WINDOWS_DATA_DISPLAY,
+                                     session_key="period_window", widget_key="prod_period")
     days = 30 if choice.startswith("30") else 7
-    return obs_all[obs_all.index >= max_ts - pd.Timedelta(days=days)]
+    return obs_all[obs_all.index >= max_ts - pd.Timedelta(days=days)], days
 
 
 def production():
     st.markdown("<h1 class='main-title'>Analyse de la production suivie</h1>", unsafe_allow_html=True)
 
     obs_all = _load()
-    prod_cols_all = [c for c in D.PRODUCTION_SOURCES if c in obs_all.columns]
-    if obs_all.empty or not prod_cols_all:
+    if obs_all.empty or "production_total" not in obs_all.columns:
         st.info("Aucune donnée de production en base.")
         return
 
-    obs = _window_filter(obs_all).sort_index()
-    prod_cols = [c for c in D.PRODUCTION_SOURCES if c in obs.columns]
-    if obs.empty:
+    obs, days = _window_filter(obs_all)
+    obs = obs.sort_index()
+    prod = obs["production_total"].dropna()
+    if prod.empty:
         st.info("Aucune donnée sur la fenêtre sélectionnée.")
         return
 
-    prod_total = obs[prod_cols].sum(axis=1)
-    totals = obs[prod_cols].sum()
-    grand_total = totals.sum()
-
     # -------------------------------------------------------------- KPI
-    nuclear_share = 100 * totals.get("NUCLEAR", 0) / grand_total if grand_total else np.nan
-    renew_share = 100 * totals[[c for c in prod_cols if c != "NUCLEAR"]].sum() / grand_total if grand_total else np.nan
+    has_temp = "temp" in obs.columns
+    slope = corr = np.nan
+    if has_temp:
+        joint = obs[["temp", "production_total"]].dropna()
+        if len(joint) >= 3:
+            slope = float(np.polyfit(joint["temp"], joint["production_total"], 1)[0])
+            corr = float(joint["temp"].corr(joint["production_total"]))
+
+    peak_ts = prod.idxmax()
+    avg_prod, avg_delta = windowed_delta(obs_all, "production_total", days)
+    _, peak_delta = windowed_delta(obs_all, "production_total", days, agg="max")
+    _, base_delta = windowed_delta(obs_all, "production_total", days, agg="min")
 
     k1, k2, k3, k4, k5 = st.columns(5)
     with k1:
-        _kpi_card("Production suivie moy.", f"{prod_total.mean():,.0f} MW".replace(",", " "))
+        kpi_card("Production moy.", f"{avg_prod:,.0f} MW".replace(",", " "),
+                 delta_pct=avg_delta)
     with k2:
-        _kpi_card("Pic de production", f"{prod_total.max():,.0f} MW".replace(",", " "),
-                  sub=prod_total.idxmax().strftime("%d/%m %Hh"))
+        kpi_card("Pic", f"{prod.max():,.0f} MW".replace(",", " "), delta_pct=peak_delta,
+                 sub=peak_ts.strftime("%d/%m %Hh"))
     with k3:
-        _kpi_card("Part nucléaire", f"{nuclear_share:.0f} %" if pd.notna(nuclear_share) else "—")
+        kpi_card("Base (min)", f"{prod.min():,.0f} MW".replace(",", " "), delta_pct=base_delta)
     with k4:
-        _kpi_card("Part renouvelable", f"{renew_share:.0f} %" if pd.notna(renew_share) else "—",
-                  sub="hors nucléaire")
+        kpi_card("Sensibilité temp.", f"{slope:+.0f} MW/°C" if pd.notna(slope) else "—")
     with k5:
-        top_src = totals.idxmax() if grand_total else "—"
-        _kpi_card("Source #1", top_src, sub=f"{100 * totals.max() / grand_total:.0f} %" if grand_total else "")
+        kpi_card("Corrélation temp.", f"r = {corr:.2f}" if pd.notna(corr) else "—")
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.caption(
-        "Périmètre : solaire, biomasse, éolien terrestre et nucléaire. "
+        "Production suivie = somme solaire + biomasse + éolien terrestre + nucléaire. "
         "Les autres filières et les échanges réseau ne figurent pas dans la source chargée."
     )
 
-    # ---------------------------------------------- Évolution empilée
-    st.subheader("Évolution de la production par source")
-    fige = go.Figure()
-    for src in prod_cols:
-        fige.add_trace(go.Scatter(x=obs.index, y=obs[src], name=src, mode="lines",
-                                  stackgroup="one", line=dict(width=0.5, color=D.ENERGY_COLORS.get(src, "#888")),
-                                  fillcolor=D.ENERGY_COLORS.get(src, "#888")))
-    fige.update_layout(height=360, yaxis_title="MW", legend=dict(orientation="h", y=1.02), **_PLOT)
-    st.plotly_chart(fige, width="stretch")
+    # ------------------------------------------------- Évolution temporelle
+    st.subheader("Évolution temporelle")
+    line = obs["production_total"].reindex(pd.date_range(obs.index.min(), obs.index.max(), freq="h"))
+    fig = go.Figure(go.Scatter(x=line.index, y=line.values, line=dict(color=_P, width=2), connectgaps=False))
+    fig.update_layout(height=320, yaxis_title="MW", **_PLOT)
+    st.plotly_chart(fig, width="stretch")
 
-    # --------------------------- Répartition (donut) + moyenne par source
-    r1, r2 = st.columns(2)
-    with r1:
-        st.subheader("Répartition moyenne")
-        means = obs[prod_cols].mean()
-        figp = go.Figure(go.Pie(labels=means.index, values=means.values, hole=0.55, textinfo="percent",
-                                marker=dict(colors=[D.ENERGY_COLORS.get(s, "#888") for s in means.index])))
-        figp.update_layout(height=340, legend=dict(orientation="h", y=-0.1), **_PLOT)
-        st.plotly_chart(figp, width="stretch")
-    with r2:
-        st.subheader("Production moyenne par source")
-        means_sorted = obs[prod_cols].mean().sort_values()
-        figb = go.Figure(go.Bar(x=means_sorted.values, y=means_sorted.index, orientation="h",
-                                marker_color=[D.ENERGY_COLORS.get(s, "#888") for s in means_sorted.index]))
-        figb.update_layout(height=340, xaxis_title="MW", **_PLOT)
-        st.plotly_chart(figb, width="stretch")
+    # ------------------------------- Distribution + courbe de charge classée
+    d1, d2 = st.columns(2)
+    with d1:
+        st.subheader("Distribution")
+        figd = go.Figure(go.Histogram(x=prod, nbinsx=40, marker_color=_P, opacity=0.75))
+        figd.update_layout(height=320, xaxis_title="Production (MW)", yaxis_title="Fréquence", **_PLOT)
+        st.plotly_chart(figd, width="stretch")
+    with d2:
+        st.subheader("Courbe de charge classée")
+        sorted_vals = np.sort(prod.values)[::-1]
+        pct = np.arange(1, len(sorted_vals) + 1) / len(sorted_vals) * 100
+        figl = go.Figure(go.Scatter(x=pct, y=sorted_vals, fill="tozeroy",
+                                    line=dict(color=_P, width=2), fillcolor="rgba(39,174,96,0.12)"))
+        figl.update_layout(height=320, xaxis_title="% du temps", yaxis_title="MW", **_PLOT)
+        st.plotly_chart(figl, width="stretch")
+        st.caption("Puissance dépassée pendant X % du temps (base à droite, pointe à gauche).")
 
-    # ------------------------------------- Profil journalier moyen par source
-    st.subheader("Profil journalier moyen (par heure)")
-    prof = obs[prod_cols].copy()
-    prof["heure"] = obs.index.hour
-    hourly = prof.groupby("heure")[prod_cols].mean()
-    figh = go.Figure()
-    for src in prod_cols:
-        figh.add_trace(go.Scatter(x=hourly.index, y=hourly[src], name=src, mode="lines",
-                                  line=dict(color=D.ENERGY_COLORS.get(src, "#888"), width=2.5)))
+    # ----------------------------------------------- Saisonnalité horaire
+    st.subheader("Saisonnalité journalière (par heure)")
+    figh = go.Figure(go.Box(x=obs.index.hour, y=obs["production_total"],
+                            marker_color="#3498db", line_color="#2c3e50", boxpoints="outliers"))
     figh.update_layout(height=340, xaxis_title="Heure", yaxis_title="MW",
-                       xaxis=dict(dtick=2), legend=dict(orientation="h", y=1.02), **_PLOT)
+                       xaxis=dict(dtick=1), **_PLOT)
     st.plotly_chart(figh, width="stretch")
-    st.caption("Le solaire culmine en milieu de journée, le nucléaire assure la base, l'éolien est variable.")
 
-    # ------------------------------------- Corrélation température par source
-    if "temp" in obs.columns:
-        st.subheader("Corrélation température — production, par source")
-        n = len(prod_cols)
-        cols = min(2, n)
-        rows = (n + cols - 1) // cols
-        figc = make_subplots(rows=rows, cols=cols,
-                             subplot_titles=[f"{s} (r={obs['temp'].corr(obs[s]):.2f})" for s in prod_cols],
-                             vertical_spacing=0.16, horizontal_spacing=0.1)
-        for i, src in enumerate(prod_cols):
-            r, c = i // cols + 1, i % cols + 1
-            figc.add_trace(go.Scatter(x=obs["temp"], y=obs[src], mode="markers",
-                                      marker=dict(color=D.ENERGY_COLORS.get(src, "#888"), size=4, opacity=0.5),
-                                      showlegend=False), row=r, col=c)
-            figc.update_xaxes(title_text="°C", row=r, col=c)
-            figc.update_yaxes(title_text="MW", row=r, col=c)
-        figc.update_layout(height=300 * rows, template="plotly_white",
-                           margin=dict(l=10, r=10, t=40, b=10))
+    # --------------------------- Saisonnalités hebdomadaire + mensuelle
+    s1, s2 = st.columns(2)
+    with s1:
+        st.subheader("Par jour de la semaine")
+        wd = obs.index.dayofweek.map(lambda i: _DAYS_FR[i])
+        figw = go.Figure(go.Box(x=wd, y=obs["production_total"],
+                                marker_color=_P, line_color="#2c3e50", boxpoints="outliers"))
+        figw.update_layout(height=340, yaxis_title="MW", **_PLOT)
+        figw.update_xaxes(categoryorder="array", categoryarray=_DAYS_FR)
+        st.plotly_chart(figw, width="stretch")
+    with s2:
+        st.subheader("Par mois")
+        mo = obs.index.month.map(lambda i: _MONTHS_FR[i - 1])
+        figm = go.Figure(go.Box(x=mo, y=obs["production_total"],
+                                marker_color=_P, line_color="#2c3e50", boxpoints="outliers"))
+        figm.update_layout(height=340, yaxis_title="MW", **_PLOT)
+        figm.update_xaxes(categoryorder="array", categoryarray=_MONTHS_FR)
+        st.plotly_chart(figm, width="stretch")
+
+    # ------------------------------------------ Heatmap heure × jour
+    st.subheader("Profil moyen — heure × jour de la semaine")
+    tmp = obs[["production_total"]].copy()
+    tmp["heure"] = obs.index.hour
+    tmp["jour"] = obs.index.dayofweek
+    pivot = tmp.pivot_table(index="heure", columns="jour", values="production_total", aggfunc="mean")
+    pivot = pivot.reindex(columns=[c for c in range(7) if c in pivot.columns])
+    fighm = go.Figure(go.Heatmap(
+        z=pivot.values, x=[_DAYS_FR[c] for c in pivot.columns], y=pivot.index,
+        colorscale="Greens", colorbar=dict(title="MW")))
+    fighm.update_layout(height=420, xaxis_title="Jour", yaxis_title="Heure", **_PLOT)
+    st.plotly_chart(fighm, width="stretch")
+
+    # ------------------------------------------ Corrélation température
+    if has_temp and pd.notna(slope):
+        st.subheader(f"Corrélation température — production (r = {corr:.2f})")
+        joint = obs[["temp", "production_total"]].dropna()
+        xs = np.linspace(joint["temp"].min(), joint["temp"].max(), 50)
+        ys = slope * xs + float(np.polyfit(joint["temp"], joint["production_total"], 1)[1])
+        figc = go.Figure()
+        figc.add_trace(go.Scatter(x=joint["temp"], y=joint["production_total"], mode="markers",
+                                  marker=dict(color="#f39c12", size=5, opacity=0.5), name="Observations"))
+        figc.add_trace(go.Scatter(x=xs, y=ys, mode="lines", line=dict(color="#2c3e50", width=2, dash="dash"),
+                                  name=f"Tendance ({slope:+.0f} MW/°C)"))
+        figc.update_layout(height=360, xaxis_title="Température (°C)", yaxis_title="Production (MW)",
+                           legend=dict(orientation="h", y=1.02), **_PLOT)
         st.plotly_chart(figc, width="stretch")

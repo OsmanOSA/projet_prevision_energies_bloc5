@@ -22,6 +22,7 @@ observations = Table(
     "observations", metadata,
     Column("ts", DateTime, primary_key=True),
     Column("temp", Float),
+    Column("production_total", Float),  # dérivée : somme des 4 colonnes ci-dessous
     Column("solar", Float),
     Column("biomass", Float),
     Column("wind_onshore", Float),

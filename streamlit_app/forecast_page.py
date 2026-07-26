@@ -5,21 +5,30 @@ import plotly.graph_objects as go
 import streamlit as st
 
 import data as D
+from kpi_card import kpi_card
+from session_config import SessionConfig, create_radio_widget
 
 _PLOT = dict(template="plotly_white", margin=dict(l=10, r=10, t=40, b=10))
 
 # Libellé -> horizon. None = mode « Toutes » (prévisions quotidiennes stockées).
+# Chaque horizon est un modèle direct dédié (pas d'autorégressif) : plus de
+# distinction « glissant » vs « autorégressif » avec cette architecture.
 _ECHEANCES = {
-    "H+1 (glissant, continu)": 1,
-    "H+6 (glissant)": 6,
-    "H+12 (glissant)": 12,
-    "Toutes (autorégressif, aplati)": None,
+    "H+1": 1,
+    "H+6": 6,
+    "H+12": 12,
+    "H+24": 24,
+    "Toutes (historisé)": None,
 }
 _LABELS = {
-    "temp": "Température (°C)", "SOLAR": "Solaire (MW)", "BIOMASS": "Biomasse (MW)",
-    "WIND_ONSHORE": "Éolien (MW)", "NUCLEAR": "Nucléaire (MW)",
+    "production_total": "Production (MW)",
     "consommation_totale": "Consommation (MW)",
+    "SOLAR": "Solaire (MW)",
+    "BIOMASS": "Biomasse (MW)",
+    "WIND_ONSHORE": "Éolien terrestre (MW)",
+    "NUCLEAR": "Nucléaire (MW)",
 }
+_SEVERITY_COLORS = {"green": "#27ae60", "orange": "#f39c12", "red": "#e74c3c"}
 
 
 def _fmt(value, signed=False):
@@ -33,19 +42,6 @@ def _fmt(value, signed=False):
     decimals = 2 if abs(value) < 100 else 0
     text = f"{value:+,.{decimals}f}" if signed else f"{value:,.{decimals}f}"
     return text.replace(",", " ")
-
-
-def _kpi_card(label, value, sub=""):
-    st.markdown(
-        f"""
-        <div class="card" style="text-align:center; padding:16px 10px;">
-            <div style="font-size:0.78rem; color:var(--faint); text-transform:uppercase; letter-spacing:0.3px; min-height:2.4em; display:flex; align-items:center; justify-content:center; line-height:1.2;">{label}</div>
-            <div style="font-size:1.4rem; font-weight:700; color:var(--accent); margin-top:4px; white-space:nowrap;">{value}</div>
-            <div style="font-size:0.76rem; color:var(--faint); margin-top:2px;">{sub}&nbsp;</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
 
 @st.cache_data(ttl=60)
@@ -69,13 +65,18 @@ def _horizons():
 
 
 @st.cache_data(ttl=300)
-def _singlestep_backtest(variable, days):
-    return D.load_singlestep_backtest(variable, days)
+def _backtest(variable, horizon, days):
+    return D.load_backtest(variable, horizon, days)
 
 
 @st.cache_data(ttl=300)
-def _rolling_backtest(variable, horizon, days):
-    return D.load_rolling_backtest(variable, horizon, days)
+def _rte_forecast(start, end):
+    return D.load_rte_consumption_forecast(start, end)
+
+
+@st.cache_data(ttl=60)
+def _forecast_for_day(variable, start, end):
+    return D.load_forecast_for_day(variable, start, end)
 
 
 def forecast():
@@ -90,18 +91,6 @@ def forecast():
         fc[column] = pd.to_datetime(fc[column])
     origin = fc["origin_ts"].iloc[0]
     generated_at = fc["run_ts"].iloc[0]
-    model_version = fc["model_version"].iloc[0] or "non renseignée"
-    horizon = int(fc["horizon_h"].max())
-
-    k1, k2, k3, k4 = st.columns(4)
-    with k1:
-        _kpi_card("Origine de la prévision", origin.strftime("%d/%m %Hh"))
-    with k2:
-        _kpi_card("Horizon", f"{horizon} h")
-    with k3:
-        _kpi_card("Variables prévues", str(fc["variable"].nunique()))
-    with k4:
-        _kpi_card("Version du modèle", str(model_version))
 
     st.caption(
         f"Générée le {generated_at:%d/%m/%Y à %H:%M} · "
@@ -109,13 +98,106 @@ def forecast():
     )
     st.markdown("<br>", unsafe_allow_html=True)
 
+    obs = _observations()
+
     var = st.selectbox("Variable", D.FEATURES,
                        index=D.FEATURES.index("consommation_totale"),
                        format_func=lambda v: _LABELS.get(v, v))
 
-    g = fc[fc["variable"] == var].sort_values("target_ts")
-    obs = _observations()
+    # Alignée sur la journée civile (00h-23h) de l'origine, pas sur la fenêtre
+    # brute de 24h glissantes d'un seul batch : un batch ne peut jamais
+    # prédire une heure antérieure à sa propre origine, donc les premières
+    # heures d'aujourd'hui (déjà réalisées) ne sont couvertes que par le
+    # batch d'hier -- on va chercher, heure par heure, la prévision issue de
+    # l'origine la plus récente disponible (cf. `load_forecast_for_day`),
+    # exactement comme RTE (J-1) qui porte lui aussi sur la journée entière.
+    day_start = origin.normalize()
+    day_end = day_start + pd.Timedelta(hours=23)
+
+    g = _forecast_for_day(var, day_start, day_end)
+    if g.empty:
+        # Repli : aucune prévision pour cette journée -> le batch le plus
+        # récent tel quel, plutôt qu'un graphique vide.
+        g = fc[fc["variable"] == var].sort_values("target_ts")
+
     hist = obs[var].tail(72) if var in obs.columns else None
+
+    realise = obs[var].reindex(g["target_ts"]) if var in obs.columns else None
+    aligned = None
+    if realise is not None and realise.notna().any():
+        aligned = pd.DataFrame({"pred": g.set_index("target_ts")["y_pred"], "reel": realise}).dropna()
+        if aligned.empty:
+            aligned = None
+
+    # Repère de crédibilité RTE (J-1), seulement pour consommation_totale
+    # (cf. scripts/fetch_rte_forecast.py) — récupéré une seule fois, réutilisé
+    # à la fois pour la carte « Précision vs RTE » ci-dessous et pour la
+    # courbe superposée sur le graphique plus bas.
+    rte = pd.DataFrame()
+    if var == "consommation_totale" and not g.empty:
+        rte = _rte_forecast(g["target_ts"].min(), g["target_ts"].max())
+
+    k1, k2, k3, k4, k5 = st.columns(5)
+    with k1:
+        kpi_card("Origine de la prévision", origin.strftime("%d/%m %Hh"))
+    if aligned is not None:
+        ecart = aligned["pred"] - aligned["reel"]
+        mae = ecart.abs().mean()
+        # WAPE : erreur totale rapportée au volume réel total (mieux que
+        # rapporter à une valeur fixe arbitraire, ou que le MAPE si la
+        # variable peut s'approcher de 0 sur certaines heures).
+        wape = 100 * mae / aligned["reel"].abs().mean()
+        with k2:
+            kpi_card("Écart absolu moyen", f"{_fmt(mae)} MW",
+                     sub=f"Sur {len(aligned)} / {len(g)} heures réalisées")
+        with k3:
+            kpi_card("WAPE partielle", f"{_fmt(wape)} %",
+                     sub=f"Sur {len(aligned)} / {len(g)} heures réalisées")
+        with k4:
+            biais = ecart.mean()
+            sens = "Sous-estimation moyenne" if biais < 0 else "Surestimation moyenne"
+            kpi_card("Biais moyen (prévu − réel)", f"{_fmt(biais, signed=True)} MW", sub=sens)
+        with k5:
+            if var != "consommation_totale":
+                kpi_card("GAIN DE MAE VS RTE J-1", "—", sub="Réservé à la consommation")
+            else:
+                skill_rte, n_rte = None, 0
+                if not rte.empty:
+                    # Comparaison stricte sur l'intersection des heures : mêmes
+                    # target_ts pour les deux MAE, sinon le score serait faussé
+                    # par un échantillon différent entre modèle et RTE.
+                    rte_aligned = aligned.merge(
+                        rte.rename(columns={"y_pred": "y_pred_rte"}).set_index("target_ts"),
+                        left_index=True, right_index=True, how="inner",
+                    )
+                    if not rte_aligned.empty:
+                        mae_modele_rte = (rte_aligned["pred"] - rte_aligned["reel"]).abs().mean()
+                        mae_rte = (rte_aligned["y_pred_rte"] - rte_aligned["reel"]).abs().mean()
+                        if mae_rte:
+                            skill_rte = 100 * (1 - mae_modele_rte / mae_rte)
+                            n_rte = len(rte_aligned)
+                if skill_rte is not None:
+                    # Seuil d'égalité : en dessous de 2 points d'écart, la
+                    # différence tient plus au bruit qu'à un vrai avantage
+                    # (surtout avec aussi peu d'heures communes). Le badge
+                    # ↑/↓ (delta_pct, même code que les autres pages) porte
+                    # le chiffre ; le mot ne fait que trancher qui gagne.
+                    if abs(skill_rte) < 2:
+                        verdict = "Égalité"
+                    elif skill_rte > 0:
+                        verdict = "Nous"
+                    else:
+                        verdict = "RTE"
+                    kpi_card("GAIN DE MAE VS RTE (J-1)", verdict, delta_pct=skill_rte,
+                             sub=f"Sur {n_rte} heures communes")
+                else:
+                    kpi_card("GAIN DE MAE VS RTE (J-1)", "—", sub="Pas de recouvrement RTE")
+    else:
+        for i, col in enumerate((k2, k3, k4)):
+            with col:
+                kpi_card("En attente du réalisé", "—", key=f"en-attente-{i}")
+        with k5:
+            kpi_card("En attente du réalisé", "—", key="en-attente-rte")
 
     fig = go.Figure()
     if hist is not None and not hist.empty:
@@ -130,35 +212,38 @@ def forecast():
     fig.add_trace(go.Scatter(x=g["target_ts"], y=g["y_pred"], name="Prévision",
                              line=dict(color="#16a2b8", width=2.5, dash="dash"), mode="lines+markers"))
 
+    # Repère de crédibilité : prévision officielle RTE J-1 (déjà chargée
+    # ci-dessus pour la carte « Précision vs RTE »), comparaison par
+    # target_ts, indépendante de notre propre notion d'origine/horizon.
+    if not rte.empty:
+        fig.add_trace(go.Scatter(x=rte["target_ts"], y=rte["y_pred"], name="Prévision RTE (J-1)",
+                                 line=dict(color="#8e44ad", width=2, dash="dot"), mode="lines+markers",
+                                 marker=dict(size=4)))
+
     # Réalisé arrivé depuis (ingestion horaire) superposé sur l'horizon prévu :
     # permet de comparer à l'œil, heure par heure, prévu vs réel.
-    realise = None
-    if var in obs.columns:
-        realise = obs[var].reindex(g["target_ts"])
-        if realise.notna().any():
-            fig.add_trace(go.Scatter(x=realise.index, y=realise.values, name="Réalisé",
-                                     line=dict(color="#e74c3c", width=2.5),
-                                     mode="lines+markers", marker=dict(size=5)))
+    if realise is not None and realise.notna().any():
+        fig.add_trace(go.Scatter(x=realise.index, y=realise.values, name="Réalisé",
+                                 line=dict(color="#e74c3c", width=2.5),
+                                 mode="lines+markers", marker=dict(size=5)))
 
     fig.update_layout(height=420, yaxis_title=_LABELS.get(var, var),
                       legend=dict(orientation="h", y=1.02), **_PLOT)
     st.plotly_chart(fig, width="stretch")
 
-    if realise is not None and realise.notna().any():
-        aligned = pd.DataFrame({"pred": g.set_index("target_ts")["y_pred"], "reel": realise}).dropna()
-        if not aligned.empty:
-            ecart = (aligned["pred"] - aligned["reel"])
-            e1, e2, e3 = st.columns(3)
-            with e1:
-                _kpi_card("Heures déjà réalisées", f"{len(aligned)} / {len(g)}")
-            with e2:
-                _kpi_card("Écart absolu moyen", _fmt(ecart.abs().mean()))
-            with e3:
-                _kpi_card("Biais (prévu − réel)", _fmt(ecart.mean(), signed=True))
-    else:
+    if aligned is None:
         st.caption("Le réalisé s'affichera au fur et à mesure de l'ingestion horaire.")
-
     st.caption("Bande = intervalle conforme dynamique (~95 %), il s'élargit avec l'horizon.")
+    if var == "consommation_totale":
+        st.caption(
+            "Prévision RTE (J-1) : prévision officielle publiée par RTE la veille pour le "
+            "jour affiché — repère externe indépendant, jamais utilisé pour entraîner notre modèle."
+        )
+        st.caption(
+            "GAIN DE MAE VS RTE (J-1) = 100 × (1 − MAE modèle / MAE RTE), calculée sur les heures "
+            "déjà réalisées communes aux deux prévisions. Positif = notre modèle fait moins "
+            "d'erreur que RTE sur ces heures ; négatif = l'inverse."
+        )
 
     # Tableau détaillé
     with st.expander("Détail des valeurs prévues"):
@@ -168,7 +253,87 @@ def forecast():
         table[numeric_columns] = table[numeric_columns].round(1)
         st.dataframe(table, width="stretch", hide_index=True)
 
+    _deficit_section(fc, obs)
     _backtesting_section(var)
+
+
+def _deficit_section(fc, obs):
+    """Évolution du déficit (production − consommation) : historique réalisé
+    prolongé par la prévision directe à 24h, avec un code couleur de
+    sévérité par rapport à l'équilibre (0) et à un seuil critique
+    data-driven (10e percentile du déficit historique) — pas de valeur
+    arbitraire codée en dur.
+    """
+    if "production_total" not in obs.columns or "consommation_totale" not in obs.columns:
+        return
+
+    deficit_hist_full = (obs["production_total"] - obs["consommation_totale"]).dropna()
+    if deficit_hist_full.empty:
+        return
+
+    prod_fc = fc[fc["variable"] == "production_total"].set_index("target_ts")
+    conso_fc = fc[fc["variable"] == "consommation_totale"].set_index("target_ts")
+    common = prod_fc.index.intersection(conso_fc.index)
+    if common.empty:
+        return
+
+    st.markdown("---")
+    st.markdown("<h2>Évolution du déficit</h2>", unsafe_allow_html=True)
+
+    critical_threshold = float(deficit_hist_full.quantile(0.10))
+    deficit_hist = deficit_hist_full.tail(7 * 24)
+    deficit_pred = (prod_fc.loc[common, "y_pred"] - conso_fc.loc[common, "y_pred"]).sort_index()
+
+    # Bande d'incertitude approximative : bornes de prod/conso combinées en
+    # supposant leurs erreurs indépendantes (deux modèles entraînés
+    # séparément) -> var(A-B) = var(A) + var(B), d'où la combinaison des
+    # bornes plutôt qu'une simple soustraction des IC.
+    has_bounds = prod_fc["y_lower"].notna().any() and conso_fc["y_lower"].notna().any()
+    if has_bounds:
+        deficit_lower = (prod_fc.loc[common, "y_lower"] - conso_fc.loc[common, "y_upper"]).sort_index()
+        deficit_upper = (prod_fc.loc[common, "y_upper"] - conso_fc.loc[common, "y_lower"]).sort_index()
+
+    def _severity(value):
+        if value >= 0:
+            return "green"
+        if value >= critical_threshold:
+            return "orange"
+        return "red"
+
+    colors = [_SEVERITY_COLORS[_severity(v)] for v in deficit_pred.values]
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=deficit_hist.index, y=deficit_hist.values, name="Réalisé",
+                             line=dict(color="#95a5a6", width=2)))
+    if has_bounds:
+        fig.add_trace(go.Scatter(
+            x=list(deficit_pred.index) + list(deficit_pred.index)[::-1],
+            y=list(deficit_upper.values) + list(deficit_lower.values)[::-1],
+            fill="toself", fillcolor="rgba(38,188,207,0.15)",
+            line=dict(color="rgba(0,0,0,0)"), name="IC ~95 % (approx.)", hoverinfo="skip"))
+    fig.add_trace(go.Scatter(x=deficit_pred.index, y=deficit_pred.values, name="Prévu",
+                             mode="lines+markers",
+                             line=dict(color="rgba(120,140,160,0.6)", width=1, dash="dot"),
+                             marker=dict(color=colors, size=9, line=dict(color="white", width=1))))
+
+    fig.add_hline(y=0, line_dash="dash", line_color="gray",
+                  annotation_text="Équilibre", annotation_position="top left")
+    fig.add_hline(y=critical_threshold, line_dash="dot", line_color="#e74c3c",
+                  annotation_text="Seuil critique (10ᵉ percentile historique)",
+                  annotation_position="bottom left")
+    if len(deficit_hist):
+        fig.add_vline(x=deficit_hist.index[-1], line_dash="dash", line_color="rgba(0,0,0,0.4)")
+
+    fig.update_layout(height=380, yaxis_title="Déficit = production − consommation (MW)",
+                      legend=dict(orientation="h", y=1.02), **_PLOT)
+    st.plotly_chart(fig, width="stretch")
+    st.caption(
+        "Trait vertical = passage de l'historique réalisé à la prévision (24h). "
+        "Couleur des points prévus : vert = équilibre ou surplus, orange = déficit "
+        "modéré, rouge = déficit sévère (parmi les 10 % pires historiquement). "
+        "Bande IC = approximation (bornes de production/consommation combinées en "
+        "supposant leurs erreurs indépendantes)."
+    )
 
 
 def _backtesting_section(var):
@@ -176,30 +341,25 @@ def _backtesting_section(var):
     st.markdown("---")
     st.markdown("<h2>Backtesting — prévu vs réalisé</h2>", unsafe_allow_html=True)
 
-    c1, c2 = st.columns([1, 1])
-    with c1:
-        periode = st.radio("Période", ["7 derniers jours", "30 derniers jours"],
-                           index=0, horizontal=True, key="bt_days")
+    with st.sidebar:
+        st.markdown("### Période")
+        periode = create_radio_widget("Fenêtre d'affichage", SessionConfig.WINDOWS_DATA_DISPLAY,
+                                      session_key="period_window", widget_key="bt_days")
     days = 7 if periode.startswith("7") else 30
 
-    with c2:
-        choix = st.selectbox(
-            "Échéance", list(_ECHEANCES), index=0, key="bt_horizon",
-            help="H+1 : le modèle dans son régime natif (1 pas sur observations "
-                 "réelles) → aucune accumulation d'erreur. H+6 / H+12 : le modèle "
-                 "tourne toutes les 6 / 12 h et prévoit d'autant, en autorégressif. "
-                 "« Toutes » : le mode quotidien historisé (origines à 24 h).",
-        )
+    choix = st.selectbox(
+        "Échéance", list(_ECHEANCES), index=0, key="bt_horizon",
+        help="Chaque échéance est prédite directement depuis son origine par "
+             "un modèle dédié (pas d'autorégression, pas d'accumulation "
+             "d'erreur d'un horizon à l'autre). « Toutes » : le mode "
+             "quotidien historisé (origines à 24 h, persisté en base).",
+    )
 
-    # Comparaison exacte : un test par préfixe confondrait « H+12 » avec « H+1 ».
     horizon = _ECHEANCES[choix]
-    mode_singlestep = horizon == 1
     mode_stocke = horizon is None
 
     try:
-        if mode_singlestep:
-            bt, origines = _singlestep_backtest(var, days), []
-        elif mode_stocke:
+        if mode_stocke:
             bt = _forecast_vs_actual(var, None, days)
             if bt.empty:
                 st.info("Aucune prévision historisée sur cette période. "
@@ -208,7 +368,8 @@ def _backtesting_section(var):
             bt = bt.dropna(subset=["y_true"]).sort_values("target_ts")
             origines = sorted(pd.to_datetime(bt["origin_ts"]).unique()) if "origin_ts" in bt else []
         else:
-            bt, origines = _rolling_backtest(var, horizon, days)
+            bt = _backtest(var, horizon, days)
+            origines = []
     except Exception as exc:
         st.error(f"Calcul du backtesting impossible : {exc}")
         return
@@ -226,6 +387,7 @@ def _backtesting_section(var):
     mae = err.abs().mean()
     rmse = float(((err ** 2).mean()) ** 0.5)
     biais = err.mean()
+    wape = 100 * mae / bt["y_true"].abs().mean()
     couverture = None
     interval_mask = bt["y_lower"].notna() & bt["y_upper"].notna()
     if interval_mask.any():
@@ -235,28 +397,24 @@ def _backtesting_section(var):
         )
         couverture = 100 * dedans.mean()
 
-    nb_origines = bt["target_ts"].dt.normalize().nunique() if horizon is not None else None
-    k1, k2, k3, k4 = st.columns(4)
+    sens = "Sous-estimation moyenne" if biais < 0 else "Surestimation moyenne"
+    k1, k2, k3, k4, k5 = st.columns(5)
     with k1:
-        _kpi_card("MAE", _fmt(mae), sub=f"{len(bt)} points")
+        kpi_card("MAE", f"{_fmt(mae)} MW", sub=f"{len(bt)} points")
     with k2:
-        _kpi_card("RMSE", _fmt(rmse))
+        kpi_card("RMSE", f"{_fmt(rmse)} MW")
     with k3:
-        _kpi_card("Biais", _fmt(biais, signed=True), sub="prévu − réel")
+        kpi_card("WAPE", f"{_fmt(wape)} %", sub="vs valeur réelle moyenne")
     with k4:
-        _kpi_card("Couverture IC", f"{couverture:.0f} %" if couverture is not None else "—")
+        kpi_card("Biais (prévu − réel)", f"{_fmt(biais, signed=True)} MW", sub=sens)
+    with k5:
+        kpi_card("Couverture IC", f"{couverture:.0f} %" if couverture is not None else "—")
 
-    if mode_singlestep:
+    if horizon is not None:
         st.caption(
-            "**H+1 glissant** : à chaque heure, la valeur suivante est prédite à partir des "
-            "observations **réelles** — aucune autorégression, donc aucune accumulation d'erreur. "
-            "C'est la performance intrinsèque du modèle (calculée à la volée, non persistée)."
-        )
-    elif horizon is not None:
-        st.caption(
-            f"**H+{horizon} glissant** : le modèle tourne toutes les {horizon} h et prévoit "
-            f"{horizon} h en autorégressif ({len(origines)} origines). Entre deux coutures "
-            "l'erreur s'accumule, puis de nouvelles observations la remettent à zéro."
+            f"**H+{horizon} direct** : chaque point est prédit depuis son origine (H-{horizon}) "
+            "par le modèle dédié à cette échéance — aucune autorégression, donc aucune "
+            "accumulation d'erreur d'un horizon à l'autre. Calculé à la volée, non persisté."
         )
 
     fig = go.Figure()
@@ -271,8 +429,9 @@ def _backtesting_section(var):
     fig.add_trace(go.Scatter(x=bt["target_ts"], y=bt["y_pred"], name="Prévu",
                              line=dict(color="#16a2b8", width=2, dash="dash")))
 
-    # Chaque origine démarre une nouvelle prévision autorégressive : on marque
-    # la couture pour que l'aplatissement reste lisible.
+    # Chaque origine correspond à un batch de prévision historisé distinct
+    # (une par jour, via scripts.backfill_forecasts) : on marque le début de
+    # chacun pour repérer les recalages successifs sur le graphique aplati.
     if origines:
         debut, fin = bt["target_ts"].min(), bt["target_ts"].max()
         for origine in origines:
@@ -284,8 +443,7 @@ def _backtesting_section(var):
                       legend=dict(orientation="h", y=1.02), **_PLOT)
     st.plotly_chart(fig, width="stretch")
     if origines:
-        st.caption("Traits verticaux = début de chaque prévision (nouvelle origine). "
-                   "Entre deux traits, l'erreur s'accumule par autorégression.")
+        st.caption("Traits verticaux = début de chaque prévision historisée (nouvelle origine).")
 
     # Distribution des erreurs : révèle un biais systématique éventuel
     fige = go.Figure(go.Histogram(x=err, nbinsx=40, marker_color="#16a2b8", opacity=0.75))

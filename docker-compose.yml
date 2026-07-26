@@ -1,11 +1,17 @@
-# Infrastructure locale de la plateforme EnergIA.
-# Phase 0 : PostgreSQL (données applicatives).
-# Phase 1 : Airflow (orchestration) — base de métadonnées séparée.
-# Les services Prometheus/Grafana viendront à la phase Observabilité.
+# Infrastructure de la plateforme EnergIA (local ou VM de déploiement).
+#
+# Exposition réseau, volontairement asymétrique :
+#   - Caddy (80/443) est le SEUL service ouvert sur toutes les interfaces ->
+#     reverse-proxy HTTPS automatique vers le dashboard Streamlit (public).
+#   - Airflow / Grafana / MLflow / alert-bridge sont liés à 127.0.0.1 : ce
+#     sont des outils d'administration du pipeline, pas le produit exposé au
+#     public -> on y accède seulement via un tunnel SSH depuis la VM
+#     (ssh -L 8080:localhost:8080 user@vm), jamais depuis Internet.
 #
 # Démarrage complet :  docker compose up -d --build
 # Données seules       :  docker compose up -d postgres
-# UI Airflow           :  http://localhost:8080  (admin / admin)
+# Dashboard public     :  https://<DOMAIN>  (ou http://<IP> si DOMAIN vide)
+# UI Airflow (privé)   :  tunnel SSH -> http://localhost:8080 (identifiants .env)
 # Arrêt                :  docker compose down     (les volumes survivent)
 
 x-airflow-common: &airflow-common
@@ -17,10 +23,15 @@ x-airflow-common: &airflow-common
       required: false
   environment: &airflow-env
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: Europe/Paris
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+    # Partagée par tous les services Airflow : signe les JWT entre webserver et
+    # scheduler pour la lecture des logs de tâches (sans clé commune, chaque
+    # conteneur en génère une aléatoire -> InvalidSignatureError côté UI).
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY:?Définir AIRFLOW_SECRET_KEY dans .env}
     # API REST déclenchable de l'extérieur (webhook Grafana -> pont d'alerte)
     AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session"
     # Seuil de dégradation surveillé (revalidé côté DAG)
@@ -57,7 +68,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-energia}
       POSTGRES_DB: ${POSTGRES_DB:-energia}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # Accès direct réservé à la machine hôte (debug/psql local) : aucun
+      # service ne s'y connecte via ce port publié, tous passent par le
+      # réseau docker interne (hostname `postgres`).
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - energia_pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -93,9 +107,14 @@ services:
       - |
         airflow db migrate
         airflow users create \
-          --username admin --password admin \
+          --username "${AIRFLOW_ADMIN_USER:-admin}" --password "${AIRFLOW_ADMIN_PASSWORD:?Définir AIRFLOW_ADMIN_PASSWORD dans .env}" \
           --firstname Admin --lastname EnergIA \
           --role Admin --email admin@energia.local || true
+        # `create` renvoie 0 même si l'utilisateur existe déjà (le || ci-dessus
+        # ne se déclenche donc jamais) -> on réapplique systématiquement le mot
+        # de passe pour que .env reste la source de vérité après un changement.
+        airflow users reset-password \
+          --username "${AIRFLOW_ADMIN_USER:-admin}" --password "${AIRFLOW_ADMIN_PASSWORD:?Définir AIRFLOW_ADMIN_PASSWORD dans .env}"
     restart: on-failure
 
   airflow-scheduler:
@@ -113,7 +132,7 @@ services:
     command: webserver
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"  # admin uniquement -> tunnel SSH, pas public
     depends_on:
       airflow-init:
         condition: service_completed_successfully
@@ -124,10 +143,10 @@ services:
     container_name: energia_grafana
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"  # admin uniquement -> tunnel SSH, pas public
     environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Définir GRAFANA_ADMIN_PASSWORD dans .env}
       GF_USERS_ALLOW_SIGN_UP: "false"
       # Injectées dans le datasource provisionné
       POSTGRES_USER: ${POSTGRES_USER:-energia}
@@ -149,12 +168,12 @@ services:
     container_name: energia_alert_bridge
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"  # appelé par Grafana via le réseau docker interne, pas public
     environment:
       AIRFLOW_API_URL: http://airflow-webserver:8080
       RETRAIN_DAG_ID: retrain_on_degradation
-      AIRFLOW_USER: admin
-      AIRFLOW_PASSWORD: admin
+      AIRFLOW_USER: ${AIRFLOW_ADMIN_USER:-admin}
+      AIRFLOW_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:?Définir AIRFLOW_ADMIN_PASSWORD dans .env}
 
   # --- Suivi d'expériences MLflow (backend PostgreSQL, artefacts servis) ---
   mlflow:
@@ -164,7 +183,7 @@ services:
     container_name: energia_mlflow
     restart: unless-stopped
     ports:
-      - "5000:5000"
+      - "127.0.0.1:5000:5000"  # admin uniquement -> tunnel SSH, pas public
     environment:
       MLFLOW_BACKEND_STORE_URI: postgresql+psycopg2://${POSTGRES_USER:-energia}:${POSTGRES_PASSWORD:-energia}@postgres:5432/${POSTGRES_DB:-energia}
     volumes:
@@ -182,7 +201,9 @@ services:
     restart: unless-stopped
     command: ["streamlit", "run", "streamlit_app/app_main.py", "--server.port=8501", "--server.address=0.0.0.0"]
     ports:
-      - "8501:8501"
+      # Public via Caddy (réseau docker interne) ; le port hôte lui-même
+      # reste local pour un accès direct de secours (tunnel SSH).
+      - "127.0.0.1:8501:8501"
     environment:
       PYTHONPATH: /app
       POSTGRES_HOST: postgres
@@ -196,8 +217,29 @@ services:
       postgres:
         condition: service_healthy
 
+  # --- Reverse-proxy public : seul service exposé sur toutes les interfaces.
+  # HTTPS automatique (Let's Encrypt) si DOMAIN pointe vers cette machine ;
+  # sinon simple HTTP sur l'IP (utile en local ou avant d'avoir un domaine).
+  caddy:
+    image: caddy:2-alpine
+    container_name: energia_caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-:80}
+    volumes:
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - streamlit
+
 volumes:
   energia_pgdata:
   airflow_pgdata:
   grafana_data:
   mlflow_artifacts:
+  caddy_data:
+  caddy_config:

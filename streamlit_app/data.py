@@ -19,7 +19,11 @@ from pipeline_prevision.db import get_observations as _get_observations
 # réseau français se lit en heure locale -> conversion à l'affichage seulement.
 DISPLAY_TZ = os.getenv("DISPLAY_TZ", "Europe/Paris")
 
-FEATURES = ["temp", "SOLAR", "BIOMASS", "WIND_ONSHORE", "NUCLEAR", "consommation_totale"]
+# production_total reste sélectionnable (dérivé : somme des 4 sources,
+# cf. local_forecaster.derive_production_total) ; les 4 sources sont
+# désormais les cibles réellement modélisées (cf. TARGET_PREFIXES).
+FEATURES = ["production_total", "consommation_totale", "SOLAR", "BIOMASS", "WIND_ONSHORE", "NUCLEAR"]
+PRODUCTION_SOURCES = ["SOLAR", "BIOMASS", "WIND_ONSHORE", "NUCLEAR"]
 
 
 def _to_local(values):
@@ -49,8 +53,15 @@ def _observations_local() -> pd.DataFrame:
     # perdu est d'une heure sur ~8760/an, sans impact visible sur les courbes.
     obs = obs[~obs.index.duplicated(keep="first")]
     return obs
-PRODUCTION_SOURCES = ["SOLAR", "BIOMASS", "WIND_ONSHORE", "NUCLEAR"]
-ENERGY_COLORS = {"SOLAR": "#f1c40f", "BIOMASS": "#27ae60", "WIND_ONSHORE": "#3498db", "NUCLEAR": "#e74c3c"}
+
+
+ENERGY_COLORS = {
+    "production_total": "#f1c40f",
+    "SOLAR": "#f39c12",
+    "BIOMASS": "#8e6c3a",
+    "WIND_ONSHORE": "#3498db",
+    "NUCLEAR": "#9b59b6",
+}
 
 
 def _query(sql: str) -> pd.DataFrame:
@@ -70,40 +81,6 @@ def load_observations(start=None, end=None) -> pd.DataFrame:
     if end is not None:
         obs = obs[obs.index <= pd.Timestamp(end)]
     return obs
-
-
-def load_kpis() -> dict:
-    """Indicateurs de tête (une valeur chacun)."""
-    row = _query(
-        """
-        SELECT
-          EXTRACT(EPOCH FROM (now() - max(ts))) / 3600 AS freshness_h,
-          count(*)                                     AS n_obs
-        FROM observations
-        """
-    ).iloc[0]
-    n_forecasts = _query("SELECT count(*) AS n FROM forecasts").iloc[0]["n"]
-    runs_ok = _query(
-        "SELECT count(*) AS n FROM pipeline_runs "
-        "WHERE status='success' AND run_ts > now() - interval '24 hours'"
-    ).iloc[0]["n"]
-    active = _query(
-        """
-        SELECT model_version, origin_ts, run_ts
-        FROM forecasts
-        ORDER BY origin_ts DESC, run_ts DESC
-        LIMIT 1
-        """
-    )
-    return {
-        "freshness_h": float(row["freshness_h"]) if row["freshness_h"] is not None else None,
-        "n_obs": int(row["n_obs"]),
-        "n_forecasts": int(n_forecasts),
-        "runs_ok_24h": int(runs_ok),
-        "model_version": (
-            str(active.iloc[0]["model_version"]) if not active.empty else None
-        ),
-    }
 
 
 def load_latest_forecast() -> pd.DataFrame:
@@ -132,6 +109,70 @@ def load_latest_forecast() -> pd.DataFrame:
     if not fc.empty:
         for column in ("run_ts", "origin_ts", "target_ts"):
             fc[column] = _to_local(fc[column])
+    return fc
+
+
+def load_forecast_for_day(variable: str, start, end) -> pd.DataFrame:
+    """Prévision couvrant toute une plage [start, end] (typiquement une
+    journée civile 00h-23h), quitte à mélanger plusieurs origines : un batch
+    ne peut jamais prédire une heure antérieure à sa propre origine, donc les
+    premières heures d'aujourd'hui (déjà réalisées) ne sont couvertes que par
+    le batch d'hier -- exactement comme la prévision RTE (J-1), qui elle
+    aussi porte sur la journée entière indépendamment de notre notion
+    d'origine/horizon.
+
+    Pour chaque `target_ts`, on garde la prévision issue de l'origine la
+    plus récente disponible (`DISTINCT ON` + tri décroissant sur origin_ts).
+    """
+    if variable not in FEATURES:
+        raise ValueError(f"Variable inconnue : {variable}")
+
+    start_utc = pd.Timestamp(start).tz_localize(DISPLAY_TZ).tz_convert("UTC").tz_localize(None)
+    end_utc = pd.Timestamp(end).tz_localize(DISPLAY_TZ).tz_convert("UTC").tz_localize(None)
+
+    fc = _query(
+        f"""
+        SELECT DISTINCT ON (target_ts)
+               run_ts, origin_ts, target_ts, horizon_h, y_pred, y_lower, y_upper, model_version
+        FROM forecasts
+        WHERE variable = '{variable}'
+          AND target_ts BETWEEN '{start_utc}' AND '{end_utc}'
+        ORDER BY target_ts, origin_ts DESC
+        """
+    )
+    if not fc.empty:
+        for column in ("run_ts", "origin_ts", "target_ts"):
+            fc[column] = _to_local(fc[column])
+        fc = fc.sort_values("target_ts")
+    return fc
+
+
+def load_rte_consumption_forecast(start, end) -> pd.DataFrame:
+    """Prévision officielle RTE J-1 de la consommation (repère de crédibilité,
+    cf. scripts/fetch_rte_forecast.py), sur la fenêtre [start, end].
+
+    Filtrée par `target_ts`, pas par origine : cette prévision externe ne
+    partage pas la même logique d'origine/horizon que notre propre modèle,
+    seule l'heure visée compte pour la superposer sur le même graphique.
+    """
+    start_local = pd.Timestamp(start)
+    end_local = pd.Timestamp(end)
+    # Les bornes sont en heure locale (comme le reste de l'app) ; la table
+    # stocke en UTC -> on repasse en UTC naïf pour le filtre SQL.
+    start_utc = start_local.tz_localize(DISPLAY_TZ).tz_convert("UTC").tz_localize(None)
+    end_utc = end_local.tz_localize(DISPLAY_TZ).tz_convert("UTC").tz_localize(None)
+
+    fc = _query(
+        f"""
+        SELECT target_ts, y_pred
+        FROM forecasts
+        WHERE variable = 'consommation_totale_rte'
+          AND target_ts BETWEEN '{start_utc}' AND '{end_utc}'
+        ORDER BY target_ts
+        """
+    )
+    if not fc.empty:
+        fc["target_ts"] = _to_local(fc["target_ts"])
     return fc
 
 
@@ -219,65 +260,49 @@ def _conformal_bounds(
     return lower, upper
 
 
-def load_singlestep_backtest(variable: str, days: int) -> pd.DataFrame:
-    """Backtest H+1 **glissant** : le modèle dans son régime natif.
-
-    À chaque heure, la valeur suivante est prédite à partir des observations
-    réelles (aucune autorégression) — courbe continue, sans accumulation
-    d'erreur. Calculé à la volée, rien n'est persisté.
+def load_backtest(variable: str, horizon: int, days: int) -> pd.DataFrame:
+    """Backtest à l'horizon `horizon` : chaque point est prédit directement
+    depuis son origine (H-`horizon`) par le modèle dédié à cet horizon — plus
+    de distinction autorégressif/glissant avec cette architecture (cf.
+    local_forecaster.backtest_direct) : un horizon = un modèle direct,
+    jamais nourri par ses propres prédictions passées.
     """
     if variable not in FEATURES:
         raise ValueError(f"Variable inconnue : {variable}")
 
     # Import tardif : la stack ML n'est pas requise pour le reste de l'app.
-    from pipeline_prevision.utils.ml_utils.model.local_forecaster import predict_singlestep
+    from pipeline_prevision.utils.ml_utils.model.local_forecaster import backtest_direct
 
-    window = _recent_window(days)
+    # Contexte étendu : les features (lags jusqu'à 336h) ont besoin d'un
+    # historique bien plus large que la fenêtre affichée -> on laisse
+    # `backtest_direct` retrancher précisément aux `days` demandés après coup.
+    window = _recent_window(days + 15)
     if window is None:
         return pd.DataFrame()
 
-    targets, y_pred, y_true, _, _ = predict_singlestep(window)
-    col = FEATURES.index(variable)
-    pred, reel = y_pred[:, col], y_true[:, col]
+    if variable == "production_total":
+        # Plus une cible modélisée : reconstruite en sommant le backtest des
+        # 4 sources (jointure stricte sur target_ts via `join="inner"` --
+        # une heure ne compte que si les 4 sources ont produit un point).
+        per_source = [backtest_direct(window, source, horizon, days=days) for source in PRODUCTION_SOURCES]
+        if any(b.empty for b in per_source):
+            return pd.DataFrame()
+        preds = pd.concat([b["y_pred"] for b in per_source], axis=1, join="inner")
+        trues = pd.concat([b["y_true"] for b in per_source], axis=1, join="inner")
+        bt = pd.DataFrame({"y_pred": preds.sum(axis=1), "y_true": trues.sum(axis=1)})
+    else:
+        bt = backtest_direct(window, variable, horizon, days=days)
+
+    if bt.empty:
+        return pd.DataFrame()
+
+    pred, reel = bt["y_pred"].to_numpy(), bt["y_true"].to_numpy()
     bas, haut = _conformal_bounds(pred, reel)
 
     return pd.DataFrame({
-        "target_ts": pd.DatetimeIndex(targets),
+        "target_ts": bt.index,
         "y_pred": pred, "y_true": reel, "y_lower": bas, "y_upper": haut,
     })
-
-
-def load_rolling_backtest(variable: str, horizon: int, days: int):
-    """Backtest autorégressif glissant : une origine tous les `horizon` pas.
-
-    Reproduit le mode d'exploitation « le modèle tourne toutes les `horizon`
-    heures et prévoit `horizon` heures » : les blocs s'enchaînent en une courbe
-    continue, et les origines marquent les remises à zéro de l'erreur.
-
-    Retourne (DataFrame, origines) pour tracer les coutures.
-    """
-    if variable not in FEATURES:
-        raise ValueError(f"Variable inconnue : {variable}")
-
-    from pipeline_prevision.utils.ml_utils.model.local_forecaster import rolling_multistep
-
-    window = _recent_window(days)
-    if window is None:
-        return pd.DataFrame(), []
-
-    targets, y_pred, y_true, origins = rolling_multistep(window, horizon)
-    col = FEATURES.index(variable)
-    pred, reel = y_pred[:, col], y_true[:, col]
-
-    # Position dans le bloc (1..horizon) : calibre l'intervalle par pas.
-    pas = np.tile(np.arange(1, horizon + 1), len(origins))[:len(pred)]
-    bas, haut = _conformal_bounds(pred, reel, step_index=pas)
-
-    df = pd.DataFrame({
-        "target_ts": pd.DatetimeIndex(targets),
-        "y_pred": pred, "y_true": reel, "y_lower": bas, "y_upper": haut,
-    })
-    return df, list(origins)
 
 
 def available_horizons() -> list:
@@ -299,16 +324,3 @@ def load_metrics() -> pd.DataFrame:
     )
 
 
-def load_runs(limit: int = 25) -> pd.DataFrame:
-    """Dernières exécutions de pipelines (horodatages en heure locale)."""
-    runs = _query(
-        f"""
-        SELECT run_ts, dag_id, status, rows, round(duration_s::numeric, 1) AS duration_s, message
-        FROM pipeline_runs
-        ORDER BY id DESC
-        LIMIT {int(limit)}
-        """
-    )
-    if not runs.empty:
-        runs["run_ts"] = _to_local(runs["run_ts"])
-    return runs

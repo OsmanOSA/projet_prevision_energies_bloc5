@@ -9,7 +9,6 @@ python-dotenv==1.2.2
 PyYAML==6.0.3
 scikit-learn==1.9.0
 lightgbm==4.7.0
-xgboost==3.3.0
 dill==0.4.1
 meteostat==2.1.4
 requests==2.34.2

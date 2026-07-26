@@ -1,8 +1,9 @@
 """Backfill de prévisions historiques (origines glissantes).
 
 Rejoue le modèle comme si `forecast_daily` avait tourné chaque jour : pour
-chaque origine quotidienne des N derniers jours, produit une prévision à
-`horizon` heures avec ses intervalles conformes et la persiste.
+chaque origine quotidienne des N derniers jours, produit une prévision
+directe (un modèle dédié par horizon, pas de rollout) avec ses intervalles
+conformes, et la persiste.
 
 Objectif : disposer d'un historique de prévisions comparable au réalisé, pour
 le backtesting visuel et pour que `evaluate_daily` produise des métriques
@@ -27,16 +28,17 @@ if _ROOT not in sys.path:
 
 from pipeline_prevision.logging.logger import logging
 from pipeline_prevision.exception.exception import ForecastingException
-from pipeline_prevision.constant.training_pipeline import LOOKBACK
 from pipeline_prevision.db import get_observations, save_forecasts, log_run, init_db
 from pipeline_prevision.utils.ml_utils.model.local_forecaster import (
-    dynamic_conformal_intervals,
+    predict_with_conformal_intervals,
     get_model_version,
+    derive_production_total,
+    TARGETS,
 )
 
-FEATURES = ["temp", "SOLAR", "BIOMASS", "WIND_ONSHORE", "NUCLEAR", "consommation_totale"]
 ORIGIN_HOUR = 23          # une prévision par jour, émise à 23 h (couvre le lendemain)
 CALIB_WINDOWS = 20        # calibration conforme allégée (le backfill est répétitif)
+MIN_HISTORY_HOURS = 340   # marge au-delà du plus grand lag utilisé (336h)
 
 
 def run(days: int = 30, horizon: int = 24) -> int:
@@ -57,26 +59,40 @@ def run(days: int = 30, horizon: int = 24) -> int:
 
         persisted = 0
         produced = 0
+        horizons = range(1, horizon + 1)
         for origin_ts in candidates:
             history = obs.loc[:origin_ts]
-            # Il faut au moins la fenêtre de lookback + de quoi calibrer.
-            if len(history) < LOOKBACK + horizon + 5:
+            if len(history) < MIN_HISTORY_HOURS + horizon:
                 continue
 
-            y_pred, y_lower, y_upper, _, _, _ = dynamic_conformal_intervals(
-                history, horizon, alpha=0.05, n_calib=CALIB_WINDOWS)
+            per_target = {
+                target: predict_with_conformal_intervals(
+                    history, target, horizons=horizons, alpha=0.05, n_calib=CALIB_WINDOWS
+                )
+                for target in TARGETS
+            }
 
-            future_ts = pd.date_range(start=origin_ts + pd.Timedelta(hours=1),
-                                      periods=len(y_pred), freq="h")
-            pred_df = pd.DataFrame(y_pred, columns=FEATURES, index=future_ts)
-            lower_df = pd.DataFrame(y_lower, columns=FEATURES, index=future_ts)
-            upper_df = pd.DataFrame(y_upper, columns=FEATURES, index=future_ts)
+            # production_total n'est plus une cible modélisée : reconstruite
+            # en sommant les 4 sources -- cf. derive_production_total.
+            derived = derive_production_total(per_target)
+            pred_df = pd.concat({
+                **{t: r["y_pred"] for t, r in per_target.items()},
+                "production_total": derived["y_pred"],
+            }, axis=1)
+            lower_df = pd.concat({
+                **{t: r["y_lower"] for t, r in per_target.items()},
+                "production_total": derived["y_lower"],
+            }, axis=1)
+            upper_df = pd.concat({
+                **{t: r["y_upper"] for t, r in per_target.items()},
+                "production_total": derived["y_upper"],
+            }, axis=1)
 
             persisted += save_forecasts(pred_df, origin_ts=origin_ts,
                                         model_version=get_model_version(),
                                         lower_df=lower_df, upper_df=upper_df)
             produced += 1
-            print(f"  origine {origin_ts} -> {len(y_pred)} pas persistés")
+            print(f"  origine {origin_ts} -> {len(pred_df)} pas persistés")
 
         duration = time.time() - t0
         log_run("backfill_forecasts", "success", rows=persisted, duration_s=duration,

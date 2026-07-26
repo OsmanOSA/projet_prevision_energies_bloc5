@@ -25,18 +25,21 @@ if _ROOT not in sys.path:
 
 from pipeline_prevision.logging.logger import logging
 from pipeline_prevision.exception.exception import ForecastingException
-from pipeline_prevision.constant.training_pipeline import LOOKBACK
 from pipeline_prevision.utils.main_utils.utils import load_object
-from pipeline_prevision.utils.ml_utils.model.estimator import ForecastModel
+from pipeline_prevision.utils.main_utils.feature_engineering import (
+    add_target_features, build_series_by_target, seasonal_baseline,
+)
+from pipeline_prevision.utils.ml_utils.model.local_forecaster import TARGETS
 from pipeline_prevision.db import get_observations, log_run
 
-FEATURES = ["temp", "SOLAR", "BIOMASS", "WIND_ONSHORE", "NUCLEAR", "consommation_totale"]
 CHAMPION_DIR = os.path.join(_ROOT, "final_models")
 CANDIDATE_DIR = os.path.join(_ROOT, "candidate_models")
 ARCHIVE_DIR = os.path.join(_ROOT, "models_archive")
 
-EVAL_HORIZON = 24   # horizon de backtest pour la comparaison
-EVAL_WINDOWS = 30   # nombre de fenêtres récentes évaluées
+# Comparaison champion/challenger : moyenne des MAE sur quelques horizons
+# représentatifs (mêmes unités MW pour les deux cibles -> agrégat comparable).
+EVAL_HORIZONS = [1, 6, 12, 24]
+EVAL_WINDOWS = 30
 
 
 def _train_challenger():
@@ -61,25 +64,54 @@ def _train_challenger():
                  data_transformation_artifact=transformation).initiate_model_trainer()
 
 
-def _load_forecast_model(model_dir):
-    preprocessor = load_object(os.path.join(model_dir, "preprocessor.pkl"))
-    model = load_object(os.path.join(model_dir, "model.pkl"))
-    return ForecastModel(preprocessor=preprocessor, model=model)
+def _backtest_mae(model_dir, series_by_target, temp) -> float:
+    """MAE moyen (5 cibles x horizons représentatifs) sur les EVAL_WINDOWS
+    dernières origines réelles. Renvoie +inf si le modèle est absent ou
+    incompatible (ex. ancien format, avant cette architecture) -> traité
+    comme "pas de champion valide", donc le challenger est promu."""
+    try:
+        composite = load_object(os.path.join(model_dir, "model.pkl"))
+        from pipeline_prevision.utils.main_utils.feature_engineering import build_origin_feature_frame
 
+        errors = []
+        for target in TARGETS:
+            target_composite = composite[target]
+            feature_columns = target_composite["feature_columns"]
+            prefix = target_composite["prefix"]
+            delta_col = f"{prefix}_delta_1"
+            series = series_by_target[target]
 
-def _backtest_mae(forecast_model, feats):
-    """MAE moyen du modèle sur les EVAL_WINDOWS fenêtres récentes de `feats`."""
-    n_origins = len(feats) - (LOOKBACK + EVAL_HORIZON)
-    if n_origins < 3:
+            features_df, _ = build_origin_feature_frame(series_by_target, temp, target)
+
+            for horizon in EVAL_HORIZONS:
+                model = target_composite["models"][horizon]
+                alpha = target_composite["alphas"][horizon]
+                seasonal_weight = target_composite["seasonal_weights"][horizon]
+
+                actual_future = series.shift(-horizon)
+                mask = features_df[feature_columns].notna().all(axis=1) & actual_future.notna()
+                frame = features_df.loc[mask].tail(EVAL_WINDOWS)
+                if frame.empty:
+                    continue
+                y_true = actual_future.loc[frame.index].to_numpy()
+
+                X = add_target_features(frame[feature_columns], horizon, delta_col)
+                residual_pred = model.predict(X)
+                persistence = frame[f"{prefix}_0"].to_numpy()
+                seasonal_value = seasonal_baseline(frame, horizon, prefix)
+                direct = persistence + alpha * residual_pred
+                y_pred = (1 - seasonal_weight) * direct + seasonal_weight * seasonal_value
+                y_pred = np.maximum(y_pred, 0.0)
+
+                errors.append(np.abs(y_pred - y_true))
+
+        if not errors:
+            return float("inf")
+        return float(np.mean(np.concatenate(errors)))
+
+    except Exception as e:
+        logging.warning("Backtest impossible sur %s (%s) -> traité comme absent", model_dir, e)
         return float("inf")
-    start = max(0, n_origins - EVAL_WINDOWS)
-    errors = []
-    for i in range(start, n_origins):
-        x = feats[i:i + LOOKBACK].tolist()
-        pred, _ = forecast_model.predict_multistep(x=x, n_futur=EVAL_HORIZON)
-        actual = feats[i + LOOKBACK:i + LOOKBACK + EVAL_HORIZON]
-        errors.append(np.abs(np.asarray(pred) - actual))
-    return float(np.mean(errors)) if errors else float("inf")
 
 
 def _promote_mlflow_alias():
@@ -110,7 +142,7 @@ def _promote():
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         shutil.copytree(CHAMPION_DIR, os.path.join(ARCHIVE_DIR, f"champion_{ts}"))
     os.makedirs(CHAMPION_DIR, exist_ok=True)
-    for fname in ("model.pkl", "preprocessor.pkl", "metadata.json"):
+    for fname in ("model.pkl", "metadata.json"):
         source = os.path.join(CANDIDATE_DIR, fname)
         if os.path.isfile(source):
             shutil.copyfile(source, os.path.join(CHAMPION_DIR, fname))
@@ -128,12 +160,12 @@ def run(margin: float = 0.0) -> bool:
         obs = get_observations()
         if obs is None or obs.empty:
             raise ValueError("Aucune observation pour l'évaluation")
-        feats = obs.sort_index()[FEATURES].to_numpy(dtype=float)
+        obs = obs.sort_index()
+        series_by_target = build_series_by_target(obs)
+        temp = obs["temp"].astype(float)
 
-        challenger_mae = _backtest_mae(_load_forecast_model(CANDIDATE_DIR), feats)
-
-        champion_exists = os.path.isfile(os.path.join(CHAMPION_DIR, "model.pkl"))
-        champion_mae = _backtest_mae(_load_forecast_model(CHAMPION_DIR), feats) if champion_exists else float("inf")
+        challenger_mae = _backtest_mae(CANDIDATE_DIR, series_by_target, temp)
+        champion_mae = _backtest_mae(CHAMPION_DIR, series_by_target, temp)
 
         promoted = challenger_mae < champion_mae * (1 - margin)
         if promoted:

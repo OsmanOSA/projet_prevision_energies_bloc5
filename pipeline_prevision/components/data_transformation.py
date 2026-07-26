@@ -1,149 +1,125 @@
 import sys
-import os
-import glob
+
 import numpy as np
 import pandas as pd
 
-from sklearn.impute import KNNImputer, SimpleImputer
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.pipeline import Pipeline
-from pipeline_prevision.constant.training_pipeline import DATA_TRANSFORMATION_IMPUTER_PARAMS
-from pipeline_prevision.constant.training_pipeline import LOOKBACK, HORIZON
-from pipeline_prevision.utils.main_utils.utils import save_numpy_array_data, save_object, window_generator
+from pipeline_prevision.utils.main_utils.utils import save_object
+from pipeline_prevision.utils.main_utils.feature_engineering import (
+    HORIZON_MAX, build_features_for_target, build_series_by_target, TARGET_PREFIXES,
+)
 from pipeline_prevision.exception.exception import ForecastingException
 from pipeline_prevision.logging.logger import logging
-from pipeline_prevision.constant import training_pipeline
 from pipeline_prevision.entity.artifact_entity import DataValidationArtifact, DataTransformationArtifact
 from pipeline_prevision.entity.config_entity import DataTransformationConfig
+
+# Les 4 sources de production (plutôt que l'agrégat production_total) +
+# consommation -- cf. feature_engineering.TARGET_PREFIXES.
+TARGET_COLUMNS = list(TARGET_PREFIXES)
+
+# Fenêtre glissée directe : 70 % train / 15 % validation / 15 % test, avec un
+# embargo de HORIZON_MAX lignes avant chaque coupure (les cibles t+1..t+24
+# d'une ligne juste avant la coupure débordent sinon dans la partition
+# suivante -> fuite). Indépendant des ratios de DataIngestionConfig, qui ne
+# servent plus qu'à produire des CSV validés en amont.
+TRAIN_RATIO = 0.70
+VALID_RATIO = 0.15
 
 
 class DataTransformation:
 
-    def __init__(self, 
+    def __init__(self,
                  data_validation_artifact: DataValidationArtifact,
                  data_transformation_config: DataTransformationConfig
                  ):
-        
         try:
             self.data_validation_artifact = data_validation_artifact
             self.data_transformation_config = data_transformation_config
-
         except Exception as e:
             raise ForecastingException(e, sys)
-        
 
-    @staticmethod    
+    @staticmethod
     def read_data(file_path) -> pd.DataFrame:
-        
         try:
-            
             return pd.read_csv(file_path, sep=None, engine="python", parse_dates=["timestamp"], index_col="timestamp")
-        
         except Exception as e:
             raise ForecastingException(e, sys)
-        
-    def get_data_transformer_object(cls) -> Pipeline:
-        """
-        It initialises a KNNImputer object with the parameters specified in the training_pipeline.py file
-        and returns a Pipeline object with the KNNImputer object as the first step.
 
-        Parameters
-        ----------
-        cls: DataTransformation
+    @staticmethod
+    def _purged_split(features_df: pd.DataFrame):
+        """Découpage chronologique 70/15/15 avec embargo HORIZON_MAX."""
+        n = len(features_df)
+        train_cut = int(n * TRAIN_RATIO)
+        valid_cut = int(n * (TRAIN_RATIO + VALID_RATIO))
 
-        Returns
-        -------
-        A Pipeline object
+        train = features_df.iloc[:train_cut - HORIZON_MAX].copy()
+        valid = features_df.iloc[train_cut:valid_cut - HORIZON_MAX].copy()
+        test = features_df.iloc[valid_cut:].copy()
+        return train, valid, test
 
-        """
-        logging.info(
-            "Entered get_data_transformer_object method of Transformation class"
-        )
-
-        try:
-           # KNNImputer calcule une matrice de distances O(n²) -> intenable en
-           # mémoire sur un dataset horaire de plusieurs dizaines de milliers de
-           # lignes. Les données étant quasi sans valeurs manquantes, un
-           # SimpleImputer (médiane) donne un résultat équivalent pour une
-           # fraction de la mémoire. Repasser à KNNImputer si peu de lignes.
-           imputer = SimpleImputer(strategy="median")
-           scaler:MinMaxScaler=MinMaxScaler()
-           logging.info("Initialise SimpleImputer(strategy='median') + MinMaxScaler")
-           processor:Pipeline=Pipeline([("imputer", imputer),
-                                        ("scaler", scaler)])
-
-           return processor
-        
-        except Exception as e:
-            raise ForecastingException(e,sys)    
-
-    def initiate_data_transformation(self) -> DataValidationArtifact:
+    def initiate_data_transformation(self) -> DataTransformationArtifact:
 
         logging.info("Entered initiate_data_transformation method of DataTransformation class")
 
         try:
+            # Les 3 CSV validés sont des tranches chronologiques contiguës
+            # (cf. DataIngestion.split_data_as_train_test_valid) : les
+            # reconcaténer reconstruit exactement la série d'origine, sur
+            # laquelle on calcule les features (lags/rolling jusqu'à 336h) et
+            # notre propre split purgé, indépendant du split brut en amont.
+            parts = [
+                DataTransformation.read_data(self.data_validation_artifact.valid_train_file_path),
+                DataTransformation.read_data(self.data_validation_artifact.valid_submission_file_path),
+                DataTransformation.read_data(self.data_validation_artifact.valid_test_file_path),
+            ]
+            full = pd.concat(parts).sort_index()
+            full = full[~full.index.duplicated(keep="last")].asfreq("h")
 
-            logging.info("Starting data transformation")
-            
-            train_df = DataTransformation.read_data(self.data_validation_artifact.valid_train_file_path)
-            submission_df = DataTransformation.read_data(self.data_validation_artifact.valid_submission_file_path)
-            test_df = DataTransformation.read_data(self.data_validation_artifact.valid_test_file_path)
-            # Impute missing values
-            preprocessor = self.get_data_transformer_object()
-            preprocessor_object = preprocessor.fit(train_df)
-            transformed_train_df = preprocessor_object.transform(train_df)
-            transformed_submission_df = preprocessor_object.transform(submission_df)
-            transformed_test_df = preprocessor_object.transform(test_df)
+            series_by_target = build_series_by_target(full)
+            temp = pd.to_numeric(full["temp"], errors="coerce")
 
-            # Generate windows sliding 
-            X_train, y_train = window_generator(transformed_train_df, 
-                                                lookback=LOOKBACK, horizon=HORIZON)
-            # Le contexte ajouté vient uniquement du passé du split précédent :
-            # la première cible de chaque split est utilisable sans fuite future.
-            valid_context = np.concatenate(
-                [transformed_train_df[-LOOKBACK:], transformed_submission_df], axis=0
-            )
-            test_history = np.concatenate(
-                [transformed_train_df, transformed_submission_df], axis=0
-            )
-            test_context = np.concatenate(
-                [test_history[-LOOKBACK:], transformed_test_df], axis=0
-            )
-            X_valid, y_valid = window_generator(
-                valid_context, lookback=LOOKBACK, horizon=HORIZON
-            )
-            X_test, y_test = window_generator(
-                test_context, lookback=LOOKBACK, horizon=HORIZON
-            )
+            bundle = {}
+            for target_column in TARGET_COLUMNS:
+                features_df, prefix, target_columns = build_features_for_target(
+                    series_by_target, temp, target_column
+                )
+                feature_columns = [c for c in features_df.columns if c not in target_columns]
 
-            train_arr = np.concatenate([X_train, y_train], axis=1)  
+                features_df = (
+                    features_df.replace([np.inf, -np.inf], np.nan)
+                    .dropna(subset=feature_columns + target_columns)
+                    .copy()
+                )
 
-            valid_arr = np.concatenate([X_valid, y_valid], axis=1)
-            test_arr = np.concatenate([X_test, y_test], axis=1)
+                train, valid, test = self._purged_split(features_df)
+                if min(len(train), len(valid), len(test)) == 0:
+                    raise ValueError(
+                        f"Historique insuffisant pour {target_column} après purge "
+                        f"(train={len(train)}, valid={len(valid)}, test={len(test)})"
+                    )
 
+                bundle[target_column] = {
+                    "prefix": prefix,
+                    "feature_columns": feature_columns,
+                    "target_columns": target_columns,
+                    "train": train,
+                    "valid": valid,
+                    "test": test,
+                }
 
-            save_numpy_array_data(self.data_transformation_config.transformed_train_file_path, 
-                                  train_arr)
-            save_numpy_array_data(self.data_transformation_config.transformed_submission_file_path, 
-                                  valid_arr)
-            save_numpy_array_data(self.data_transformation_config.transformed_test_file_path, 
-                                  test_arr)
-            save_object(self.data_transformation_config.transformed_object_file_path, 
-                        preprocessor_object)
-            
-            # Dossier de sortie paramétrable (voir MODEL_OUTPUT_DIR dans model_trainer)
-            output_dir = os.getenv("MODEL_OUTPUT_DIR", "candidate_models")
-            save_object(file_path=os.path.join(output_dir, "preprocessor.pkl"), obj=preprocessor_object)
-            
-            #preparing artifacts
-            data_transformation_artifact=DataTransformationArtifact(
-                transformed_object_file_path = self.data_transformation_config.transformed_object_file_path,
-                transformed_train_file_path = self.data_transformation_config.transformed_train_file_path,
-                 transformed_submission_file_path = self.data_transformation_config.transformed_submission_file_path,
-                transformed_test_file_path = self.data_transformation_config.transformed_test_file_path
+                logging.info(
+                    "Transformation %s : train=%s valid=%s test=%s (%s features)",
+                    target_column, len(train), len(valid), len(test), len(feature_columns),
+                )
+
+            save_object(self.data_transformation_config.transformed_object_file_path, bundle)
+
+            data_transformation_artifact = DataTransformationArtifact(
+                transformed_object_file_path=self.data_transformation_config.transformed_object_file_path,
+                transformed_train_file_path=self.data_transformation_config.transformed_train_file_path,
+                transformed_submission_file_path=self.data_transformation_config.transformed_submission_file_path,
+                transformed_test_file_path=self.data_transformation_config.transformed_test_file_path,
             )
             return data_transformation_artifact
 
         except Exception as e:
             raise ForecastingException(e, sys)
-        

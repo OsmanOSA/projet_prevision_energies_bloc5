@@ -8,7 +8,7 @@ import sys
 from datetime import datetime, timezone
 
 import pandas as pd
-from sqlalchemy import and_, select, text
+from sqlalchemy import and_, inspect, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from pipeline_prevision.db.config import get_engine
@@ -22,6 +22,7 @@ from pipeline_prevision.exception.exception import ForecastingException
 # normalise en snake_case.
 DF_TO_DB = {
     "temp": "temp",
+    "production_total": "production_total",
     "SOLAR": "solar",
     "BIOMASS": "biomass",
     "WIND_ONSHORE": "wind_onshore",
@@ -43,6 +44,29 @@ def init_db() -> None:
             conn.execute(text(
                 "ALTER TABLE forecast_metrics ADD COLUMN IF NOT EXISTS mse DOUBLE PRECISION"
             ))
+            # Historique : passage du détail par filière à l'agrégat unique
+            # production_total (cf. concat_all_data), puis retour au détail
+            # par filière (décision produit : l'agrégat noyait l'éolien, seule
+            # composante volatile, sous des composantes stables/calendaires).
+            # production_total reste une colonne dérivée (somme des 4 filières).
+            conn.execute(text(
+                "ALTER TABLE observations ADD COLUMN IF NOT EXISTS production_total DOUBLE PRECISION"
+            ))
+            per_source_cols = {"solar", "biomass", "wind_onshore", "nuclear"}
+            for col in per_source_cols:
+                conn.execute(text(
+                    f"ALTER TABLE observations ADD COLUMN IF NOT EXISTS {col} DOUBLE PRECISION"
+                ))
+            # Backfill de production_total uniquement s'il manque encore et
+            # que le détail par filière est disponible pour le recalculer.
+            existing = {c["name"] for c in inspect(conn).get_columns("observations")}
+            if per_source_cols & existing:
+                sum_expr = " + ".join(f"COALESCE({c}, 0)" for c in per_source_cols if c in existing)
+                not_null_expr = " OR ".join(f"{c} IS NOT NULL" for c in per_source_cols if c in existing)
+                conn.execute(text(
+                    f"UPDATE observations SET production_total = {sum_expr} "
+                    f"WHERE production_total IS NULL AND ({not_null_expr})"
+                ))
     except Exception as e:
         raise ForecastingException(e, sys)
 

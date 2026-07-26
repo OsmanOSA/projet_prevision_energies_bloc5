@@ -90,15 +90,13 @@ h2 {
     border: none;
 }
 
-/* st.subheader : petite barre d'accent pour rythmer la page */
+/* st.subheader */
 h3 {
     color: var(--ink) !important;
     font-weight: 600;
     font-size: 1.02rem;
     text-align: left;
     margin: 1.7rem 0 .65rem 0;
-    padding-left: .6rem;
-    border-left: 3px solid var(--accent);
 }
 
 h4 {
@@ -251,11 +249,6 @@ section[data-testid="stSidebar"] .stRadio label:has(input:checked) * {
 
 /* --------------------------------------------------------- 6. Graphes */
 [data-testid="stPlotlyChart"] {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 10px 8px 4px 8px;
-    box-shadow: var(--shadow-sm);
     margin-bottom: .5rem;
 }
 

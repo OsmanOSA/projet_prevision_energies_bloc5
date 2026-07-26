@@ -13,6 +13,7 @@ dill>=0.3.7
 psycopg2-binary>=2.9
 meteostat>=2.0,<3.0
 scikit-learn>=1.3
-# Nécessaires pour désérialiser + prédire avec le modèle entraîné (final_models/)
-xgboost>=2.0
+# Nécessaire pour désérialiser + prédire avec le modèle entraîné (final_models/)
 lightgbm>=4.0
+# Nécessaire pour l'entraînement (scripts.retrain -> DAG retrain_on_degradation)
+optuna>=4.0

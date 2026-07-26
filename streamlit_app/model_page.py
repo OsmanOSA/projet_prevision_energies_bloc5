@@ -5,21 +5,9 @@ import plotly.graph_objects as go
 import streamlit as st
 
 import data as D
+from kpi_card import kpi_card
 
 _PLOT = dict(template="plotly_white", margin=dict(l=10, r=10, t=40, b=10))
-
-
-def _kpi_card(label, value, sub=""):
-    st.markdown(
-        f"""
-        <div class="card" style="text-align:center; padding:16px 10px;">
-            <div style="font-size:0.78rem; color:var(--faint); text-transform:uppercase; letter-spacing:0.3px; min-height:2.4em; display:flex; align-items:center; justify-content:center; line-height:1.2;">{label}</div>
-            <div style="font-size:1.4rem; font-weight:700; color:var(--accent); margin-top:4px; white-space:nowrap;">{value}</div>
-            <div style="font-size:0.76rem; color:var(--faint); margin-top:2px;">{sub}&nbsp;</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
 
 @st.cache_data(ttl=60)
@@ -51,13 +39,13 @@ def model_performance():
 
     k1, k2, k3, k4 = st.columns(4)
     with k1:
-        _kpi_card("Couverture IC moy.", f"{cov:.0f} %" if pd.notna(cov) else "—", sub="cible ~95 %")
+        kpi_card("Couverture IC moy.", f"{cov:.0f} %" if pd.notna(cov) else "—", sub="cible ~95 %")
     with k2:
-        _kpi_card("Points évalués", f"{int(m['n_points'].sum())}")
+        kpi_card("Points évalués", f"{int(m['n_points'].sum())}")
     with k3:
-        _kpi_card("MAE conso (H+24)", f"{conso24.iloc[0]:,.0f} MW".replace(",", " ") if not conso24.empty else "—")
+        kpi_card("MAE conso (H+24)", f"{conso24.iloc[0]:,.0f} MW".replace(",", " ") if not conso24.empty else "—")
     with k4:
-        _kpi_card("Variables suivies", str(m["variable"].nunique()))
+        kpi_card("Variables suivies", str(m["variable"].nunique()))
 
     st.markdown("<br>", unsafe_allow_html=True)
 

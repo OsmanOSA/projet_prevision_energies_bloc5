@@ -15,13 +15,21 @@ from pipeline_prevision.exception.exception import ForecastingException
 from pipeline_prevision.logging.logger import logging
 from pipeline_prevision.constant.training_pipeline import SIX_MONTHS, FIVE_MONTHS, TYPE_SOURCE
 
-from sklearn.metrics import r2_score, mean_absolute_error
-# NB : hyperopt n'est importé que dans evaluate_models (entraînement), pas au
-# niveau module -> l'ingestion et l'inférence n'en dépendent pas (image Airflow).
-
 from meteostat import Point, hourly, Parameter, stations
 
 load_dotenv()
+
+# Bornes physiquement plausibles par source de production (cf. concat_all_data) --
+# capacité installée française par filière, avec marge. Identifiées après un
+# incident RTE réel : NUCLEAR est tombé à ~0 puis a pic à >100 000 MW sur
+# certaines heures (sept-oct 2024), physiquement impossible pour un agrégat
+# national (capacité nucléaire installée ~61 000 MW).
+PRODUCTION_BOUNDS = {
+    "NUCLEAR": (20000, 65000),
+    "SOLAR": (0, 25000),
+    "BIOMASS": (0, 2000),
+    "WIND_ONSHORE": (0, 20000),
+}
 
 def read_yaml_file(file_path: str) -> dict:
 
@@ -162,61 +170,6 @@ def window_generator(data: np.ndarray,
         raise ForecastingException(e, sys) from e
     
 
-def evaluate_models(X_train, y_train,
-                    X_valid, y_valid,
-                    models, param, max_evals: int = 15):
-    """Optimisation bayésienne des hyperparamètres (hyperopt / TPE).
-
-    Pour chaque modèle, minimise la MAE de validation via l'algorithme TPE
-    (Tree-structured Parzen Estimator) au lieu d'un balayage exhaustif
-    (GridSearchCV). Chaque modèle de `models` est réajusté en place avec ses
-    meilleurs hyperparamètres, et la fonction renvoie {nom_modele: MAE_valid}.
-
-    param : {nom_modele: espace de recherche hyperopt (hp.*)}.
-    """
-    try:
-        # Import paresseux : hyperopt n'est requis que pour l'entraînement.
-        from hyperopt import fmin, tpe, Trials, STATUS_OK, space_eval
-
-        report = {}
-
-        for name, model in models.items():
-            space = param[name]
-
-            def objective(candidate, _model=model):
-                # MAE de validation pour un jeu d'hyperparamètres candidat.
-                _model.set_params(**candidate)
-                _model.fit(X_train, y_train)
-                pred = _model.predict(X_valid)
-                return {"loss": mean_absolute_error(y_valid, pred), "status": STATUS_OK}
-
-            trials = Trials()
-            best = fmin(
-                fn=objective,
-                space=space,
-                algo=tpe.suggest,
-                max_evals=max_evals,
-                trials=trials,
-                show_progressbar=False,
-                rstate=np.random.default_rng(42),
-            )
-            best_params = space_eval(space, best)
-
-            # Réajustement final avec les meilleurs hyperparamètres.
-            model.set_params(**best_params)
-            model.fit(X_train, y_train)
-            test_model_score = mean_absolute_error(y_valid, model.predict(X_valid))
-            report[name] = test_model_score
-
-            logging.info("TPE %s -> MAE valid=%.4f | params=%s",
-                         name, test_model_score, best_params)
-
-        return report
-
-    except Exception as e:
-        raise ForecastingException(e, sys)
-    
-    
 def daterange(start_date, end_date, delta):
     current_date = start_date
     while current_date < end_date:
@@ -275,7 +228,68 @@ def extract_conso(start_date: str, end_date: str):
     except Exception as e:
         raise ForecastingException(e, sys)
 
-    
+
+def extract_conso_forecast_rte(target_date: str) -> pd.DataFrame:
+    """Prévision officielle RTE J-1 de la consommation (API Consumption,
+    type=D-1) : celle publiée par RTE la veille au soir pour `target_date`
+    (YYYY-MM-DD). Sert uniquement de référence externe de crédibilité sur le
+    dashboard (comparaison à notre propre modèle) — jamais utilisée en
+    entraînement.
+
+    RTE exige une fenêtre d'au moins ~2 jours pour ce type de requête ; on
+    interroge donc [target-1j, target+1j] même si on ne veut que `target`.
+    """
+    try:
+        URL_TOKEN = os.getenv("URL_TOKEN")
+        CLIENT_ID = os.getenv("CLIENT_ID")
+        CLIENT_SECRET = os.getenv("CLIENT_SECRET")
+
+        response = requests.post(URL_TOKEN, data={"grant_type": "client_credentials"},
+                                 auth=(CLIENT_ID, CLIENT_SECRET))
+        token = response.json().get("access_token")
+
+        BASE_URL = os.getenv("BASE_URL_CONSO_FORECAST")
+        headers = {"Host": "digital.iservices.rte-france.com", "Authorization": f"Bearer {token}"}
+
+        target = datetime.strptime(target_date, "%Y-%m-%d")
+        start = target - timedelta(days=1)
+        end = target + timedelta(days=1)
+
+        url = f"{BASE_URL}&start_date={start.isoformat()}%2B02:00&end_date={end.isoformat()}%2B02:00"
+        response = requests.get(url, headers=headers)
+        if response.status_code != 200:
+            raise ValueError(f"Requête prévision RTE échouée : {response.text}")
+
+        dates, values = [], []
+        for entry in response.json().get("short_term", []):
+            if entry.get("type") != "D-1":
+                continue
+            for point in entry.get("values", []):
+                dates.append(point["start_date"])
+                values.append(point["value"])
+
+        if not dates:
+            raise ValueError(f"Aucune prévision RTE (D-1) disponible pour {target_date}")
+
+        df = pd.DataFrame({"timestamp": dates, "y_pred": values})
+        df["timestamp"] = pd.to_datetime(df["timestamp"], format="%Y-%m-%dT%H:%M:%S%z", utc=True)
+        df = df.set_index("timestamp").resample("h").mean()
+
+        # La fenêtre de requête (imposée par RTE) déborde volontairement du
+        # jour ciblé et peut ramener la prévision D-1 d'un jour voisin en
+        # prime -> on ne garde que les 24h locales de `target_date`.
+        local_index = df.index.tz_convert("Europe/Paris")
+        target_day = pd.Timestamp(target_date).date()
+        df = df.loc[local_index.date == target_day]
+
+        # Naïf UTC : même convention que le reste du pipeline (cf. extract_conso).
+        df.index = df.index.tz_localize(None)
+        df.index.name = "timestamp"
+        return df
+
+    except Exception as e:
+        raise ForecastingException(e, sys)
+
 
 def extract_temperature(start_date, end_date, var_name="temp"):
 
@@ -311,6 +325,7 @@ def extract_temperature(start_date, end_date, var_name="temp"):
 def extract_production(start_date, end_date):
     
     try:
+
         start_date = datetime.strptime(start_date, '%Y-%m-%d')
         end_date = datetime.strptime(end_date, '%Y-%m-%d')
         
@@ -398,6 +413,7 @@ def extract_production(start_date, end_date):
 def concat_all_data(start_date, end_date):
     
     try:
+
         df_temp = extract_temperature(start_date, end_date)
         df_prod = extract_production(start_date, end_date)
         df_prod["timestamp"] = pd.to_datetime(df_prod["timestamp"], format="%Y-%m-%d %H:%M:%S")
@@ -405,31 +421,50 @@ def concat_all_data(start_date, end_date):
         df_conso = extract_conso(start_date, end_date)
         df_conso["timestamp"] = pd.to_datetime(df_conso["timestamp"], format="%Y-%m-%d %H:%M:%S")
         df_conso.set_index("timestamp", inplace=True)
-        
+
         # Supprimer les doublons
         df_temp = df_temp[~df_temp.index.duplicated()]
         df_prod = df_prod[~df_prod.index.duplicated()]
         df_conso = df_conso[~df_conso.index.duplicated()]
-        
+
         # Trier les index
         df_temp.sort_index(inplace=True)
         df_prod.sort_index(inplace=True)
         df_conso.sort_index(inplace=True)
-        
+
         full_index = pd.date_range(start=df_prod.index[0], end=df_prod.index[-1], freq="h")
         full_index.name = "timestamp"
-        
+
         df_temp = df_temp.reindex(full_index)
         df_prod = df_prod.reindex(full_index)
+
+        # Bornes physiquement plausibles avant toute agrégation : le nucléaire
+        # français ne peut pas dépasser sa capacité installée ni tomber à 0
+        # sur un agrégat national -- incident RTE identifié empiriquement
+        # (~2 mois, sept-oct 2024, + quelques points isolés). Hors bornes ->
+        # NaN, comme un trou normal, plutôt qu'une valeur silencieusement fausse.
+        for col, (lo, hi) in PRODUCTION_BOUNDS.items():
+            if col in df_prod.columns:
+                out_of_bounds = (df_prod[col] < lo) | (df_prod[col] > hi)
+                df_prod.loc[out_of_bounds, col] = np.nan
+
         df_conso = df_conso.reindex(full_index)
-        
-        df_prod = df_prod.loc[df_prod.index[0]:df_prod.index[-1], :]
-        df_conso = df_conso.loc[df_prod.index[0]:df_prod.index[-1], :]
-        df_temp = df_temp.loc[df_prod.index[0]:df_prod.index[-1], :]
-        
-        df = pd.concat([df_temp, df_prod, df_conso], axis=1)
+
+        df_prod = df_prod.loc[full_index[0]:full_index[-1], :]
+        df_conso = df_conso.loc[full_index[0]:full_index[-1], :]
+        df_temp = df_temp.loc[full_index[0]:full_index[-1], :]
+
+        # Cibles en premier (les 4 sources de production), consommation ;
+        # temp en dernier -- variable exogène, jamais prédite (cf.
+        # model_trainer.py). Interpolation d'abord, puis production_total
+        # dérivée de la somme des sources déjà interpolées -- jamais l'inverse :
+        # interpoler la somme et les sources séparément peut les rendre
+        # incohérentes entre elles (deux interpolations indépendantes ne se
+        # raccordent pas forcément aux mêmes bornes de trou, d'où une dérive).
+        df = pd.concat([df_prod, df_conso, df_temp], axis=1)
         df.fillna(value=df.interpolate(method='linear', limit_direction='both'), inplace=True)
-    
+        df.insert(0, "production_total", df[list(PRODUCTION_BOUNDS)].sum(axis=1))
+
         return df
     
     except Exception as e:
