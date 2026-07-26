@@ -82,8 +82,11 @@ def home():
                 <li><strong>Analyse Production :</strong> évolution par source, répartition et corrélations météo.</li>
                 <li><strong>Prévisions :</strong> prévisions multi-horizon avec intervalles conformes (~95 %).</li>
                 <li><strong>Performance modèle :</strong> erreurs prévu vs réalisé (MAE, RMSE, couverture des intervalles).</li>
-                <li><strong>Pipelines :</strong> suivi des exécutions Airflow et fraîcheur des données.</li>
             </ul>
+            <p style="margin-top: 0.5rem; font-size: 0.9em; color: var(--text-secondary-color, inherit);">
+                Le suivi des exécutions Airflow et de la fraîcheur des données est disponible
+                séparément dans Grafana (accès administrateur).
+            </p>
         </div>
         """,
         unsafe_allow_html=True,

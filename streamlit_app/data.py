@@ -312,14 +312,26 @@ def available_horizons() -> list:
 
 
 def load_metrics() -> pd.DataFrame:
-    """Métriques de la dernière évaluation (prévu vs réalisé)."""
+    """Dernière évaluation disponible, par variable.
+
+    Chaque variable est évaluée dès que son réalisé existe (asynchrone selon
+    l'horizon et la date de mise en service de son modèle) : un unique
+    `MAX(eval_ts)` global ferait disparaître silencieusement toute variable
+    non couverte par le tout dernier lot (ex. une source de production tout
+    juste réactivée dont le réalisé n'est pas encore connu pour tous les
+    horizons). On prend donc le dernier lot propre à chaque variable.
+    """
     return _query(
         """
-        SELECT period_start, period_end, variable, horizon_h, mae, rmse,
-               mape, bias, coverage, n_points, model_version
-        FROM forecast_metrics
-        WHERE eval_ts = (SELECT max(eval_ts) FROM forecast_metrics)
-        ORDER BY variable, horizon_h
+        SELECT fm.period_start, fm.period_end, fm.variable, fm.horizon_h, fm.mae, fm.rmse,
+               fm.mape, fm.bias, fm.coverage, fm.n_points, fm.model_version
+        FROM forecast_metrics fm
+        INNER JOIN (
+            SELECT variable, max(eval_ts) AS eval_ts
+            FROM forecast_metrics
+            GROUP BY variable
+        ) latest ON fm.variable = latest.variable AND fm.eval_ts = latest.eval_ts
+        ORDER BY fm.variable, fm.horizon_h
         """
     )
 

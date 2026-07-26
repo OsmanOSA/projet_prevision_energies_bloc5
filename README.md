@@ -52,11 +52,15 @@ Meteostat (température) ┴──► ingestion (scripts/ingest.py, DAG ingest_h
    alias `champion`/`challenger`)                  (DAG retrain_on_degradation,
         │                                           revalidé contre le seuil
         ▼                                           avant tout réentraînement)
-  Streamlit (streamlit_app/, 7 pages :
+  Streamlit (streamlit_app/, 6 pages :
    Accueil, Vue d'ensemble, Analyse
    Consommation, Analyse Production,
-   Prévisions, Performance modèle, Pipelines)
+   Prévisions, Performance modèle)
 ```
+
+Le suivi des exécutions Airflow et de la fraîcheur des données (« Pipelines »)
+n'est pas dans l'app Streamlit mais dans Grafana (accès administrateur, voir
+plus bas).
 
 Le dashboard Streamlit et l'API FastAPI (`app.py`, déploiement autonome
 optionnel) lisent uniquement des artefacts déjà produits — aucune logique
@@ -68,7 +72,7 @@ d'entraînement ne s'exécute dans l'interface.
 |---|---|
 | Langage | Python 3.12.4 (voir `.python-version`) |
 | Données | pandas, numpy, PostgreSQL (SQLAlchemy + psycopg2) |
-| Modèles | scikit-learn, XGBoost, LightGBM, statsmodels, hyperopt (TPE) |
+| Modèles | scikit-learn (splits, métriques), LightGBM, hyperopt (TPE) |
 | Sources de données | API RTE (consommation, production), Meteostat (température) |
 | Orchestration | Apache Airflow (LocalExecutor) |
 | Suivi d'expériences | MLflow (registre de modèles, alias champion/challenger) |
@@ -81,17 +85,20 @@ d'entraînement ne s'exécute dans l'interface.
 ## Chemin des données
 
 `RTE + Meteostat → ingestion (upsert PostgreSQL) → validation (schéma,
-chronologie, dérive KS) → transformation (imputation médiane + MinMaxScaler,
-fenêtres glissantes lookback=36h/horizon=1h) → entraînement (XGBoost /
-LightGBM, sélection bayésienne, comparaison à une baseline de persistance) →
+chronologie, dérive KS) → transformation (features causales : lags et
+moyennes glissantes jusqu'à 336h, un jeu de features par cible) →
+entraînement (LightGBM, un modèle direct par horizon 1 à 24h, sélection
+bayésienne, comparaison à une double baseline de persistance) →
 enregistrement (MLflow + artefacts hashés SHA-256) → prévision (intervalles
 conformes dynamiques) → évaluation continue (prévu vs réalisé) → affichage
 Streamlit → supervision Grafana`.
 
 Le découpage entraînement/validation/test est **strictement chronologique**
-(aucun mélange aléatoire) ; l'imputer et le scaler sont ajustés uniquement
-sur le train ; le contexte de fenêtrage ajouté à la validation/au test ne
-provient que du passé du split précédent.
+(aucun mélange aléatoire), avec un embargo de 24h (l'horizon maximal) à
+chaque frontière pour empêcher une cible de chevaucher la partition
+suivante. Il n'y a ni imputer ni scaler ajustés globalement : les lignes
+avec valeurs manquantes après calcul des features sont retirées
+(`dropna`), de façon déterministe et identique entre partitions.
 
 ## Installation & lancement
 
@@ -158,28 +165,32 @@ python -m scripts.backfill_forecasts 30 24         # rejoue des prévisions hist
 
 ```bash
 pytest -q                                          # tests unitaires
-RUN_STREAMLIT_INTEGRATION=1 pytest -q tests/test_streamlit_integration.py  # rendu des 7 pages (nécessite PostgreSQL peuplé)
+RUN_STREAMLIT_INTEGRATION=1 pytest -q tests/test_streamlit_integration.py  # rendu des 6 pages (nécessite PostgreSQL peuplé)
 ruff check .                                        # lint (règles syntaxiques : E9, F63, F7, F82)
 docker compose config -q                            # valide docker-compose.yml
 ```
 
 ## Modèles et validation
 
-- **Cible** : température, production par filière suivie (solaire, biomasse,
-  éolien terrestre, nucléaire) et consommation totale — prévision
-  multi-sortie (un seul modèle prédit les six variables).
-- **Régime natif** : horizon 1 heure (`HORIZON=1`, `LOOKBACK=36`). Les
-  horizons plus longs sont obtenus par autorégression (le modèle réinjecte
-  ses propres prédictions), avec intervalles de confiance conformes qui
-  s'élargissent avec l'horizon.
-- **Sélection de modèle** : XGBoost et LightGBM (via `MultiOutputRegressor`),
-  hyperparamètres optimisés par recherche bayésienne (hyperopt/TPE) sur la
-  validation ; le modèle retenu est celui de MAE de validation la plus
-  basse.
-- **Baseline** : chaque modèle est comparé, par variable, à une baseline de
-  persistance (dernière valeur observée) sur le test — le rapport
-  `metadata.json` de chaque artefact conserve ce comparatif
-  (`beats_persistence`).
+- **Cible** : production par filière suivie (solaire, biomasse, éolien
+  terrestre, nucléaire) et consommation totale — cinq cibles, chacune avec
+  son propre jeu de modèles. La température est une variable exogène
+  (entrée uniquement, jamais prédite).
+- **Architecture (`direct_multihorizon_residual`)** : pour chaque cible, 24
+  modèles LightGBM indépendants sont entraînés, un par horizon (h = 1 à 24
+  heures), chacun prédisant directement `target_h{h}` depuis les features
+  ancrées à l'instant d'origine — il n'y a **pas** de réinjection
+  autorégressive des prédictions en production. Les intervalles de
+  confiance conformes s'élargissent avec l'horizon.
+- **Sélection de modèle** : LightGBM, hyperparamètres optimisés par
+  recherche bayésienne (hyperopt/TPE) via `TimeSeriesSplit` purgé sur le
+  développement (train+valid) ; le modèle retenu par horizon est celui de
+  MAE de validation la plus basse.
+- **Baseline** : chaque modèle est comparé, par variable et par horizon, à
+  une double baseline (persistance de la dernière valeur observée et
+  persistance saisonnière) sur le test — le rapport `metadata.json` de
+  chaque artefact conserve ce comparatif (gain % par rapport à la
+  persistance).
 - **Versionnement** : chaque modèle entraîné produit un `metadata.json`
   (hash SHA-256 du modèle et des CSV sources, commit Git, hyperparamètres,
   métriques de test par variable, versions runtime). MLflow conserve
@@ -210,7 +221,7 @@ pipeline_prevision/       # cœur ML : ingestion, validation, transformation, en
   db/                      # accès PostgreSQL (observations, prévisions, métriques, runs)
   entity/                  # configs et artefacts typés
   utils/ml_utils/          # estimator, métriques, inférence locale (local_forecaster)
-streamlit_app/            # dashboard (7 pages) + accès aux données
+streamlit_app/            # dashboard (6 pages) + accès aux données
 dags/                      # DAGs Airflow (ingestion, prévision, évaluation, réentraînement)
 scripts/                   # exécutions unitaires préfigurant les DAGs
 docker/                    # Dockerfiles par service (airflow, mlflow, streamlit, alert_bridge)

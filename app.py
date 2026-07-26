@@ -56,7 +56,10 @@ app.add_middleware(
 
 class Observation(BaseModel):
     timestamp: str
-    production_total: float
+    SOLAR: float
+    BIOMASS: float
+    WIND_ONSHORE: float
+    NUCLEAR: float
     consommation_totale: float
     temp: float
 

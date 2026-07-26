@@ -411,10 +411,12 @@ class ModelTrainer:
                     dataset_hashes[dataset_path.name] = hashlib.sha256(dataset_file.read()).hexdigest()
             try:
                 git_commit = subprocess.check_output(
-                    ["git", "rev-parse", "HEAD"], text=True, stderr=subprocess.DEVNULL
+                    ["git", "rev-parse", "HEAD"], text=True, stderr=subprocess.PIPE
                 ).strip()
-            except (OSError, subprocess.SubprocessError):
+            except (OSError, subprocess.SubprocessError) as git_error:
                 git_commit = None
+                detail = getattr(git_error, "stderr", None) or str(git_error)
+                logging.warning("Capture du commit Git échouée (non bloquant) : %s", detail.strip() if isinstance(detail, str) else detail)
 
             metadata = {
                 "model_version": f"sha256:{model_sha256[:12]}",

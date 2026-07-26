@@ -1,4 +1,4 @@
-"""Optional integration checks for the seven Streamlit pages.
+"""Optional integration checks for the six Streamlit pages.
 
 Run locally with a PostgreSQL instance populated by the application:
     RUN_STREAMLIT_INTEGRATION=1 pytest -q tests/test_streamlit_integration.py
@@ -24,7 +24,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-@pytest.mark.parametrize("page_index", range(7))
+@pytest.mark.parametrize("page_index", range(6))
 def test_streamlit_page_renders_without_exception(page_index: int) -> None:
     app = AppTest.from_file(
         str(STREAMLIT_DIR / "app_main.py"),
