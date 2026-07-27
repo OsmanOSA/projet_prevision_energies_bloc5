@@ -21,21 +21,31 @@ _ECHEANCES = {
     "Toutes (historisé)": None,
 }
 _LABELS = {
-    "production_total": "Production (MW)",
-    "consommation_totale": "Consommation (MW)",
-    "SOLAR": "Solaire (MW)",
-    "BIOMASS": "Biomasse (MW)",
-    "WIND_ONSHORE": "Éolien terrestre (MW)",
-    "NUCLEAR": "Nucléaire (MW)",
+    "production_total": "Production (GW)",
+    "consommation_totale": "Consommation (GW)",
+    "SOLAR": "Solaire (GW)",
+    "BIOMASS": "Biomasse (GW)",
+    "WIND_ONSHORE": "Éolien terrestre (GW)",
+    "NUCLEAR": "Nucléaire (GW)",
 }
+# temp est la seule variable non énergétique de D.FEATURES (°C, jamais GW).
+_POWER_SCALE = 1000.0  # MW -> GW
+
+
+def _var_scale(var: str) -> tuple[float, str]:
+    """(diviseur, unité) selon la variable : GW pour les grandeurs
+    énergétiques, °C (inchangé) pour la température."""
+    if var == "temp":
+        return 1.0, "°C"
+    return _POWER_SCALE, "GW"
 _SEVERITY_COLORS = {"green": "#27ae60", "orange": "#f39c12", "red": "#e74c3c"}
 
 
 def _fmt(value, signed=False):
     """Formate une erreur en s'adaptant à l'ordre de grandeur.
 
-    Les MW se lisent en entiers (~1000), mais la température se compte en
-    dixièmes de degré : arrondir à l'entier afficherait « 0 ».
+    Les GW se lisent avec 2 décimales (valeurs typiquement < 100), la
+    température en dixièmes de degré : arrondir à l'entier afficherait « 0 ».
     """
     if value is None or pd.isna(value):
         return "—"
@@ -103,15 +113,17 @@ def forecast():
     var = st.selectbox("Variable", D.FEATURES,
                        index=D.FEATURES.index("consommation_totale"),
                        format_func=lambda v: _LABELS.get(v, v))
+    scale, unit = _var_scale(var)
 
-    # Alignée sur la journée civile (00h-23h) de l'origine, pas sur la fenêtre
-    # brute de 24h glissantes d'un seul batch : un batch ne peut jamais
-    # prédire une heure antérieure à sa propre origine, donc les premières
-    # heures d'aujourd'hui (déjà réalisées) ne sont couvertes que par le
-    # batch d'hier -- on va chercher, heure par heure, la prévision issue de
-    # l'origine la plus récente disponible (cf. `load_forecast_for_day`),
-    # exactement comme RTE (J-1) qui porte lui aussi sur la journée entière.
-    day_start = origin.normalize()
+    # Alignée sur la journée civile (00h-23h) RÉELLE ("aujourd'hui"), pas sur
+    # le jour de l'origine : juste après minuit, la dernière heure observée
+    # complète porte quasi toujours la date de la veille (l'ingestion horaire
+    # ingère l'heure qui vient de s'écouler), donc ancrer sur `origin.date()`
+    # affiche systématiquement le jour civil d'hier. On va chercher, heure
+    # par heure, la prévision issue de l'origine la plus récente disponible
+    # (cf. `load_forecast_for_day`) sur le jour civil courant -- exactement
+    # comme RTE (J-1) qui porte lui aussi sur la journée entière.
+    day_start = pd.Timestamp.now(tz=D.DISPLAY_TZ).tz_localize(None).normalize()
     day_end = day_start + pd.Timedelta(hours=23)
 
     g = _forecast_for_day(var, day_start, day_end)
@@ -148,7 +160,7 @@ def forecast():
         # variable peut s'approcher de 0 sur certaines heures).
         wape = 100 * mae / aligned["reel"].abs().mean()
         with k2:
-            kpi_card("Écart absolu moyen", f"{_fmt(mae)} MW",
+            kpi_card("Écart absolu moyen", f"{_fmt(mae / scale)} {unit}",
                      sub=f"Sur {len(aligned)} / {len(g)} heures réalisées")
         with k3:
             kpi_card("WAPE partielle", f"{_fmt(wape)} %",
@@ -156,7 +168,7 @@ def forecast():
         with k4:
             biais = ecart.mean()
             sens = "Sous-estimation moyenne" if biais < 0 else "Surestimation moyenne"
-            kpi_card("Biais moyen (prévu − réel)", f"{_fmt(biais, signed=True)} MW", sub=sens)
+            kpi_card("Biais moyen (prévu − réel)", f"{_fmt(biais / scale, signed=True)} {unit}", sub=sens)
         with k5:
             if var != "consommation_totale":
                 kpi_card("GAIN DE MAE VS RTE J-1", "—", sub="Réservé à la consommation")
@@ -201,29 +213,30 @@ def forecast():
 
     fig = go.Figure()
     if hist is not None and not hist.empty:
-        fig.add_trace(go.Scatter(x=hist.index, y=hist.values, name="Historique",
+        fig.add_trace(go.Scatter(x=hist.index, y=hist.values / scale, name="Historique",
                                  line=dict(color="#7f8c8d", width=2)))
     if g["y_lower"].notna().any() and g["y_upper"].notna().any():
         fig.add_trace(go.Scatter(
             x=list(g["target_ts"]) + list(g["target_ts"])[::-1],
-            y=list(g["y_upper"]) + list(g["y_lower"])[::-1],
+            y=list(g["y_upper"] / scale) + list(g["y_lower"] / scale)[::-1],
             fill="toself", fillcolor="rgba(38,188,207,0.18)",
             line=dict(color="rgba(0,0,0,0)"), name="IC ~95 %", hoverinfo="skip"))
-    fig.add_trace(go.Scatter(x=g["target_ts"], y=g["y_pred"], name="Prévision",
+    fig.add_trace(go.Scatter(x=g["target_ts"], y=g["y_pred"] / scale, name="Prévision",
                              line=dict(color="#16a2b8", width=2.5, dash="dash"), mode="lines+markers"))
 
     # Repère de crédibilité : prévision officielle RTE J-1 (déjà chargée
     # ci-dessus pour la carte « Précision vs RTE »), comparaison par
     # target_ts, indépendante de notre propre notion d'origine/horizon.
+    # RTE (consommation uniquement) est toujours en puissance -> /1000 fixe.
     if not rte.empty:
-        fig.add_trace(go.Scatter(x=rte["target_ts"], y=rte["y_pred"], name="Prévision RTE (J-1)",
+        fig.add_trace(go.Scatter(x=rte["target_ts"], y=rte["y_pred"] / _POWER_SCALE, name="Prévision RTE (J-1)",
                                  line=dict(color="#8e44ad", width=2, dash="dot"), mode="lines+markers",
                                  marker=dict(size=4)))
 
     # Réalisé arrivé depuis (ingestion horaire) superposé sur l'horizon prévu :
     # permet de comparer à l'œil, heure par heure, prévu vs réel.
     if realise is not None and realise.notna().any():
-        fig.add_trace(go.Scatter(x=realise.index, y=realise.values, name="Réalisé",
+        fig.add_trace(go.Scatter(x=realise.index, y=realise.values / scale, name="Réalisé",
                                  line=dict(color="#e74c3c", width=2.5),
                                  mode="lines+markers", marker=dict(size=5)))
 
@@ -267,7 +280,7 @@ def _deficit_section(fc, obs):
     if "production_total" not in obs.columns or "consommation_totale" not in obs.columns:
         return
 
-    deficit_hist_full = (obs["production_total"] - obs["consommation_totale"]).dropna()
+    deficit_hist_full = ((obs["production_total"] - obs["consommation_totale"]) / _POWER_SCALE).dropna()
     if deficit_hist_full.empty:
         return
 
@@ -282,7 +295,7 @@ def _deficit_section(fc, obs):
 
     critical_threshold = float(deficit_hist_full.quantile(0.10))
     deficit_hist = deficit_hist_full.tail(7 * 24)
-    deficit_pred = (prod_fc.loc[common, "y_pred"] - conso_fc.loc[common, "y_pred"]).sort_index()
+    deficit_pred = ((prod_fc.loc[common, "y_pred"] - conso_fc.loc[common, "y_pred"]) / _POWER_SCALE).sort_index()
 
     # Bande d'incertitude approximative : bornes de prod/conso combinées en
     # supposant leurs erreurs indépendantes (deux modèles entraînés
@@ -290,8 +303,8 @@ def _deficit_section(fc, obs):
     # bornes plutôt qu'une simple soustraction des IC.
     has_bounds = prod_fc["y_lower"].notna().any() and conso_fc["y_lower"].notna().any()
     if has_bounds:
-        deficit_lower = (prod_fc.loc[common, "y_lower"] - conso_fc.loc[common, "y_upper"]).sort_index()
-        deficit_upper = (prod_fc.loc[common, "y_upper"] - conso_fc.loc[common, "y_lower"]).sort_index()
+        deficit_lower = ((prod_fc.loc[common, "y_lower"] - conso_fc.loc[common, "y_upper"]) / _POWER_SCALE).sort_index()
+        deficit_upper = ((prod_fc.loc[common, "y_upper"] - conso_fc.loc[common, "y_lower"]) / _POWER_SCALE).sort_index()
 
     def _severity(value):
         if value >= 0:
@@ -324,7 +337,7 @@ def _deficit_section(fc, obs):
     if len(deficit_hist):
         fig.add_vline(x=deficit_hist.index[-1], line_dash="dash", line_color="rgba(0,0,0,0.4)")
 
-    fig.update_layout(height=380, yaxis_title="Déficit = production − consommation (MW)",
+    fig.update_layout(height=380, yaxis_title="Déficit = production − consommation (GW)",
                       legend=dict(orientation="h", y=1.02), **_PLOT)
     st.plotly_chart(fig, width="stretch")
     st.caption(
@@ -338,6 +351,7 @@ def _deficit_section(fc, obs):
 
 def _backtesting_section(var):
     """Backtesting : courbe prévue vs courbe réelle sur les derniers jours."""
+    scale, unit = _var_scale(var)
     st.markdown("---")
     st.markdown("<h2>Backtesting — prévu vs réalisé</h2>", unsafe_allow_html=True)
 
@@ -400,13 +414,13 @@ def _backtesting_section(var):
     sens = "Sous-estimation moyenne" if biais < 0 else "Surestimation moyenne"
     k1, k2, k3, k4, k5 = st.columns(5)
     with k1:
-        kpi_card("MAE", f"{_fmt(mae)} MW", sub=f"{len(bt)} points")
+        kpi_card("MAE", f"{_fmt(mae / scale)} {unit}", sub=f"{len(bt)} points")
     with k2:
-        kpi_card("RMSE", f"{_fmt(rmse)} MW")
+        kpi_card("RMSE", f"{_fmt(rmse / scale)} {unit}")
     with k3:
         kpi_card("WAPE", f"{_fmt(wape)} %", sub="vs valeur réelle moyenne")
     with k4:
-        kpi_card("Biais (prévu − réel)", f"{_fmt(biais, signed=True)} MW", sub=sens)
+        kpi_card("Biais (prévu − réel)", f"{_fmt(biais / scale, signed=True)} {unit}", sub=sens)
     with k5:
         kpi_card("Couverture IC", f"{couverture:.0f} %" if couverture is not None else "—")
 
@@ -421,12 +435,12 @@ def _backtesting_section(var):
     if bt["y_lower"].notna().any():
         fig.add_trace(go.Scatter(
             x=list(bt["target_ts"]) + list(bt["target_ts"])[::-1],
-            y=list(bt["y_upper"]) + list(bt["y_lower"])[::-1],
+            y=list(bt["y_upper"] / scale) + list(bt["y_lower"] / scale)[::-1],
             fill="toself", fillcolor="rgba(38,188,207,0.12)",
             line=dict(color="rgba(0,0,0,0)"), name="IC ~95 %", hoverinfo="skip"))
-    fig.add_trace(go.Scatter(x=bt["target_ts"], y=bt["y_true"], name="Réalisé",
+    fig.add_trace(go.Scatter(x=bt["target_ts"], y=bt["y_true"] / scale, name="Réalisé",
                              line=dict(color="#e74c3c", width=2)))
-    fig.add_trace(go.Scatter(x=bt["target_ts"], y=bt["y_pred"], name="Prévu",
+    fig.add_trace(go.Scatter(x=bt["target_ts"], y=bt["y_pred"] / scale, name="Prévu",
                              line=dict(color="#16a2b8", width=2, dash="dash")))
 
     # Chaque origine correspond à un batch de prévision historisé distinct
@@ -446,8 +460,8 @@ def _backtesting_section(var):
         st.caption("Traits verticaux = début de chaque prévision historisée (nouvelle origine).")
 
     # Distribution des erreurs : révèle un biais systématique éventuel
-    fige = go.Figure(go.Histogram(x=err, nbinsx=40, marker_color="#16a2b8", opacity=0.75))
+    fige = go.Figure(go.Histogram(x=err / scale, nbinsx=40, marker_color="#16a2b8", opacity=0.75))
     fige.add_vline(x=0, line_dash="dash", line_color="gray")
-    fige.update_layout(height=260, xaxis_title="Erreur (prévu − réel)",
+    fige.update_layout(height=260, xaxis_title=f"Erreur (prévu − réel) ({unit})",
                        yaxis_title="Fréquence", **_PLOT)
     st.plotly_chart(fige, width="stretch")

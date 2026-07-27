@@ -61,16 +61,16 @@ def consumption():
 
     k1, k2, k3, k4, k5 = st.columns(5)
     with k1:
-        kpi_card("Consommation moy.", f"{avg_conso:,.0f} MW".replace(",", " "),
+        kpi_card("Consommation moy.", f"{avg_conso / 1000:,.2f} GW".replace(",", " "),
                  delta_pct=avg_delta, higher_is_better=False)
     with k2:
-        kpi_card("Pic", f"{conso.max():,.0f} MW".replace(",", " "), delta_pct=peak_delta,
+        kpi_card("Pic", f"{conso.max() / 1000:,.2f} GW".replace(",", " "), delta_pct=peak_delta,
                  sub=peak_ts.strftime("%d/%m %Hh"), higher_is_better=False)
     with k3:
-        kpi_card("Base (min)", f"{conso.min():,.0f} MW".replace(",", " "), delta_pct=base_delta,
+        kpi_card("Base (min)", f"{conso.min() / 1000:,.2f} GW".replace(",", " "), delta_pct=base_delta,
                  higher_is_better=False)
     with k4:
-        kpi_card("Thermosensibilité", f"{slope:+.0f} MW/°C" if pd.notna(slope) else "—")
+        kpi_card("Thermosensibilité", f"{slope / 1000:+.2f} GW/°C" if pd.notna(slope) else "—")
     with k5:
         kpi_card("Corrélation temp.", f"r = {corr:.2f}" if pd.notna(corr) else "—")
 
@@ -79,32 +79,32 @@ def consumption():
     # ------------------------------------------------- Évolution temporelle
     st.subheader("Évolution temporelle")
     line = obs["consommation_totale"].reindex(pd.date_range(obs.index.min(), obs.index.max(), freq="h"))
-    fig = go.Figure(go.Scatter(x=line.index, y=line.values, line=dict(color=_C, width=2), connectgaps=False))
-    fig.update_layout(height=320, yaxis_title="MW", **_PLOT)
+    fig = go.Figure(go.Scatter(x=line.index, y=line.values / 1000, line=dict(color=_C, width=2), connectgaps=False))
+    fig.update_layout(height=320, yaxis_title="GW", **_PLOT)
     st.plotly_chart(fig, width="stretch")
 
     # ------------------------------- Distribution + courbe de charge classée
     d1, d2 = st.columns(2)
     with d1:
         st.subheader("Distribution")
-        figd = go.Figure(go.Histogram(x=conso, nbinsx=40, marker_color=_C, opacity=0.75))
-        figd.update_layout(height=320, xaxis_title="Consommation (MW)", yaxis_title="Fréquence", **_PLOT)
+        figd = go.Figure(go.Histogram(x=conso / 1000, nbinsx=40, marker_color=_C, opacity=0.75))
+        figd.update_layout(height=320, xaxis_title="Consommation (GW)", yaxis_title="Fréquence", **_PLOT)
         st.plotly_chart(figd, width="stretch")
     with d2:
         st.subheader("Courbe de charge classée")
-        sorted_vals = np.sort(conso.values)[::-1]
+        sorted_vals = np.sort(conso.values)[::-1] / 1000
         pct = np.arange(1, len(sorted_vals) + 1) / len(sorted_vals) * 100
         figl = go.Figure(go.Scatter(x=pct, y=sorted_vals, fill="tozeroy",
                                     line=dict(color=_C, width=2), fillcolor="rgba(231,76,60,0.12)"))
-        figl.update_layout(height=320, xaxis_title="% du temps", yaxis_title="MW", **_PLOT)
+        figl.update_layout(height=320, xaxis_title="% du temps", yaxis_title="GW", **_PLOT)
         st.plotly_chart(figl, width="stretch")
         st.caption("Puissance dépassée pendant X % du temps (base à droite, pointe à gauche).")
 
     # ----------------------------------------------- Saisonnalité horaire
     st.subheader("Saisonnalité journalière (par heure)")
-    figh = go.Figure(go.Box(x=obs.index.hour, y=obs["consommation_totale"],
+    figh = go.Figure(go.Box(x=obs.index.hour, y=obs["consommation_totale"] / 1000,
                             marker_color="#3498db", line_color="#2c3e50", boxpoints="outliers"))
-    figh.update_layout(height=340, xaxis_title="Heure", yaxis_title="MW",
+    figh.update_layout(height=340, xaxis_title="Heure", yaxis_title="GW",
                        xaxis=dict(dtick=1), **_PLOT)
     st.plotly_chart(figh, width="stretch")
 
@@ -113,17 +113,17 @@ def consumption():
     with s1:
         st.subheader("Par jour de la semaine")
         wd = obs.index.dayofweek.map(lambda i: _DAYS_FR[i])
-        figw = go.Figure(go.Box(x=wd, y=obs["consommation_totale"],
+        figw = go.Figure(go.Box(x=wd, y=obs["consommation_totale"] / 1000,
                                 marker_color=_C, line_color="#2c3e50", boxpoints="outliers"))
-        figw.update_layout(height=340, yaxis_title="MW", **_PLOT)
+        figw.update_layout(height=340, yaxis_title="GW", **_PLOT)
         figw.update_xaxes(categoryorder="array", categoryarray=_DAYS_FR)
         st.plotly_chart(figw, width="stretch")
     with s2:
         st.subheader("Par mois")
         mo = obs.index.month.map(lambda i: _MONTHS_FR[i - 1])
-        figm = go.Figure(go.Box(x=mo, y=obs["consommation_totale"],
+        figm = go.Figure(go.Box(x=mo, y=obs["consommation_totale"] / 1000,
                                 marker_color=_C, line_color="#2c3e50", boxpoints="outliers"))
-        figm.update_layout(height=340, yaxis_title="MW", **_PLOT)
+        figm.update_layout(height=340, yaxis_title="GW", **_PLOT)
         figm.update_xaxes(categoryorder="array", categoryarray=_MONTHS_FR)
         st.plotly_chart(figm, width="stretch")
 
@@ -135,8 +135,8 @@ def consumption():
     pivot = tmp.pivot_table(index="heure", columns="jour", values="consommation_totale", aggfunc="mean")
     pivot = pivot.reindex(columns=[c for c in range(7) if c in pivot.columns])
     fighm = go.Figure(go.Heatmap(
-        z=pivot.values, x=[_DAYS_FR[c] for c in pivot.columns], y=pivot.index,
-        colorscale="YlOrRd", colorbar=dict(title="MW")))
+        z=pivot.values / 1000, x=[_DAYS_FR[c] for c in pivot.columns], y=pivot.index,
+        colorscale="YlOrRd", colorbar=dict(title="GW")))
     fighm.update_layout(height=420, xaxis_title="Jour", yaxis_title="Heure", **_PLOT)
     st.plotly_chart(fighm, width="stretch")
 
@@ -147,10 +147,10 @@ def consumption():
         xs = np.linspace(joint["temp"].min(), joint["temp"].max(), 50)
         ys = slope * xs + float(np.polyfit(joint["temp"], joint["consommation_totale"], 1)[1])
         figc = go.Figure()
-        figc.add_trace(go.Scatter(x=joint["temp"], y=joint["consommation_totale"], mode="markers",
+        figc.add_trace(go.Scatter(x=joint["temp"], y=joint["consommation_totale"] / 1000, mode="markers",
                                   marker=dict(color="#f39c12", size=5, opacity=0.5), name="Observations"))
-        figc.add_trace(go.Scatter(x=xs, y=ys, mode="lines", line=dict(color="#2c3e50", width=2, dash="dash"),
-                                  name=f"Tendance ({slope:+.0f} MW/°C)"))
-        figc.update_layout(height=360, xaxis_title="Température (°C)", yaxis_title="Consommation (MW)",
+        figc.add_trace(go.Scatter(x=xs, y=ys / 1000, mode="lines", line=dict(color="#2c3e50", width=2, dash="dash"),
+                                  name=f"Tendance ({slope / 1000:+.2f} GW/°C)"))
+        figc.update_layout(height=360, xaxis_title="Température (°C)", yaxis_title="Consommation (GW)",
                            legend=dict(orientation="h", y=1.02), **_PLOT)
         st.plotly_chart(figc, width="stretch")

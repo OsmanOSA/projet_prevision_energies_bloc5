@@ -219,7 +219,12 @@ def extract_conso(start_date: str, end_date: str):
         df = pd.DataFrame({"timestamp": dates, "consommation_totale": consommation})
         df["timestamp"] = pd.to_datetime(df["timestamp"], format="%Y-%m-%dT%H:%M:%S%z", utc=True)
         df = df.set_index("timestamp").resample("h").mean()
-        df.fillna(value=df.interpolate(method="linear", limit_direction="both"), inplace=True)
+        # limit_area="inside" : ne comble que les trous entourés de valeurs
+        # connues. Sans ça, la dernière heure (pas encore publiée par RTE,
+        # cf. le délai de publication éCO2mix) se voit dupliquer la valeur de
+        # l'heure précédente au lieu de rester NaN -- une fausse observation
+        # qui fausse silencieusement les comparaisons prévu/réalisé.
+        df.fillna(value=df.interpolate(method="linear", limit_direction="both", limit_area="inside"), inplace=True)
         df.reset_index(inplace=True)
         df["timestamp"] = df["timestamp"].dt.strftime(date_format="%Y-%m-%d %H:%M:%S")
         df = pd.DataFrame(df)
@@ -398,7 +403,9 @@ def extract_production(start_date, end_date):
             
             d_prod = pd.DataFrame(df_prod).set_index('timestamp')
             
-            df_prod.fillna(value=df_prod.interpolate(method="linear", limit_direction="both"), inplace=True)
+            # cf. concat_all_data plus bas : limit_area="inside" pour ne pas
+            # dupliquer la dernière heure pas encore publiée par RTE.
+            df_prod.fillna(value=df_prod.interpolate(method="linear", limit_direction="both", limit_area="inside"), inplace=True)
             df_prod.reset_index(inplace=True)
             
             df_prod["timestamp"] = df_prod["timestamp"].dt.strftime(date_format="%Y-%m-%d %H:%M:%S")
@@ -462,8 +469,19 @@ def concat_all_data(start_date, end_date):
         # incohérentes entre elles (deux interpolations indépendantes ne se
         # raccordent pas forcément aux mêmes bornes de trou, d'où une dérive).
         df = pd.concat([df_prod, df_conso, df_temp], axis=1)
-        df.fillna(value=df.interpolate(method='linear', limit_direction='both'), inplace=True)
-        df.insert(0, "production_total", df[list(PRODUCTION_BOUNDS)].sum(axis=1))
+        # limit_area="inside" : comble uniquement les trous internes, jamais
+        # en tête/fin de série -- la donnée la plus récente n'est souvent pas
+        # encore publiée par RTE (délai éCO2mix) ; mieux vaut la laisser NaN
+        # (-> NULL en base) qu'une valeur fabriquée qui fausserait les
+        # comparaisons prévu/réalisé et les métriques de performance.
+        df.fillna(value=df.interpolate(method='linear', limit_direction='both', limit_area='inside'), inplace=True)
+        # min_count = nombre de filières : si l'une d'elles manque encore
+        # (NaN, cf. limit_area="inside" ci-dessus), le total reste NaN au
+        # lieu de sommer silencieusement les 3 autres -- une filière absente
+        # (souvent NUCLEAR, >40 000 MW) fausserait sinon massivement le total
+        # sans que rien ne le signale.
+        sources = list(PRODUCTION_BOUNDS)
+        df.insert(0, "production_total", df[sources].sum(axis=1, min_count=len(sources)))
 
         return df
     

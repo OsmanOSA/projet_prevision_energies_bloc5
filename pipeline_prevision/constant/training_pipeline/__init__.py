@@ -1,7 +1,4 @@
 import os
-import sys
-import numpy as np
-import pandas as pd
 
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -11,9 +8,6 @@ from datetime import datetime, timedelta
     Defining common constant variable for training pipeline
 
 """
-
-LOOKBACK: int = 36
-HORIZON: int = 1
 
 HOUR: int = 60*60
 DAY: int = 24 * HOUR
@@ -36,7 +30,6 @@ SUBMISSION_FILE_NAME: str = "valid.csv"
 
 PATH_FILE_DATASET = Path("datasets")
 SCHEMA_FILE_PATH = os.path.join("data_schema", "schema.yaml")
-SAVED_MODEL_DIR =os.path.join("saved_models")
 MODEL_FILE_NAME = "model.pkl"
 
 """
@@ -72,18 +65,6 @@ DATA_TRANSFORMATION_DIR_NAME: str = "data_transformation"
 DATA_TRANSFORMATION_TRANSFORMED_DATA_DIR: str = "transformed"
 DATA_TRANSFORMATION_TRANSFORMED_OBJECT_DIR: str = "transformed_object"
 
-
-## kkn imputer to replace nan values
-DATA_TRANSFORMATION_IMPUTER_PARAMS: dict = {
-    "missing_values": np.nan,
-    "n_neighbors": 3,
-    "weights": "uniform",
-}
-
-DATA_TRANSFORMATION_TRAIN_FILE_PATH: str = "train.npy"
-DATA_TRANSFORMATION_VALID_FILE_PATH: str = "valid.npy"
-DATA_TRANSFORMATION_TEST_FILE_PATH: str = "test.npy"
-
 """
 Model trainer related constant start with MODEL TRAINER VAR NAME
 
@@ -91,7 +72,6 @@ Model trainer related constant start with MODEL TRAINER VAR NAME
 
 MODEL_TRAINER_DIR_NAME: str = "model_trainer"
 MODEL_TRAINER_TRAINED_MODEL_DIR: str = "trained_model"
-MODEL_TRAINER_TRAINED_MODEL_NAME: str = "model.pkl"
 MODEL_TRAINER_EXCEPTED_SCORE = 0.6
 MODEL_TRAINER_OVER_FITTING_UNDER_FITTING_THRESHOLD = 0.05
 

@@ -43,7 +43,7 @@ def model_performance():
     with k2:
         kpi_card("Points évalués", f"{int(m['n_points'].sum())}")
     with k3:
-        kpi_card("MAE conso (H+24)", f"{conso24.iloc[0]:,.0f} MW".replace(",", " ") if not conso24.empty else "—")
+        kpi_card("MAE conso (H+24)", f"{conso24.iloc[0] / 1000:,.2f} GW".replace(",", " ") if not conso24.empty else "—")
     with k4:
         kpi_card("Variables suivies", str(m["variable"].nunique()))
 
@@ -53,16 +53,13 @@ def model_performance():
     with c1:
         st.subheader("MAE moyen des variables électriques")
         power_metrics = m[m["variable"] != "temp"]
-        by_var = power_metrics.groupby("variable")["mae"].mean().sort_values()
+        by_var = power_metrics.groupby("variable")["mae"].mean().sort_values() / 1000
         figb = go.Figure(go.Bar(
             x=by_var.values, y=by_var.index, orientation="h",
             marker_color="#16a2b8",
         ))
-        figb.update_layout(height=320, xaxis_title="MAE (MW)", **_PLOT)
+        figb.update_layout(height=320, xaxis_title="MAE (GW)", **_PLOT)
         st.plotly_chart(figb, width="stretch")
-        temp_mae = m.loc[m["variable"] == "temp", "mae"].mean()
-        if pd.notna(temp_mae):
-            st.caption(f"Température : MAE moyenne {temp_mae:.2f} °C (échelle séparée).")
     with c2:
         st.subheader("Couverture IC par variable")
         by_cov = m.groupby("variable")["coverage"].mean().sort_values()
@@ -77,9 +74,10 @@ def model_performance():
                        index=sorted(m["variable"].unique()).index("consommation_totale")
                        if "consommation_totale" in m["variable"].values else 0)
     gv = m[m["variable"] == var].sort_values("horizon_h")
+    unit = "°C" if var == "temp" else "GW"
+    mae_scale = 1.0 if var == "temp" else 1000.0
     figh = go.Figure()
-    figh.add_trace(go.Bar(x=gv["horizon_h"], y=gv["mae"], name="MAE", marker_color="#16a2b8"))
-    unit = "°C" if var == "temp" else "MW"
+    figh.add_trace(go.Bar(x=gv["horizon_h"], y=gv["mae"] / mae_scale, name="MAE", marker_color="#16a2b8"))
     figh.update_layout(
         height=300, xaxis_title="Horizon (h)", yaxis_title=f"MAE ({unit})", **_PLOT
     )
