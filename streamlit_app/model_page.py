@@ -84,9 +84,13 @@ def model_performance():
     st.plotly_chart(figh, width="stretch")
 
     st.subheader("Détail par variable × horizon")
+    detail = m.copy()
+    power_rows = detail["variable"] != "temp"
+    detail.loc[power_rows, ["mae", "rmse", "bias"]] = detail.loc[power_rows, ["mae", "rmse", "bias"]] / 1000
     st.dataframe(
-        m.rename(columns={"variable": "Variable", "horizon_h": "Horizon", "mae": "MAE", "rmse": "RMSE",
-                          "mape": "MAPE %", "bias": "Biais", "coverage": "Couv IC %", "n_points": "N"})
-        .round(1),
+        detail.rename(columns={"variable": "Variable", "horizon_h": "Horizon", "mae": "MAE", "rmse": "RMSE",
+                               "mape": "MAPE %", "bias": "Biais", "coverage": "Couv IC %", "n_points": "N"})
+        .round(2),
         width="stretch", hide_index=True,
     )
+    st.caption("MAE / RMSE / Biais en GW, sauf pour la température (°C).")

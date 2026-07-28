@@ -68,6 +68,19 @@ BIAS_SHRINKAGE = 0.5      # n'applique que la moitié du biais estimé
 BIAS_CAP_FRACTION = 0.05  # plafond : ±5 % de la valeur réelle récente (rolling 7 j)
 BIAS_TYPICAL_WINDOW = 24 * 7
 
+# --- Trous de température ---------------------------------------------------
+# `temp` est exogène (Meteostat) et publiée avec un retard variable. Un seul
+# NaN suffit à invalider les 168 h de features SUIVANTES (temp_lag_168 et les
+# rolling 168 h, cf. feature_engineering) : une heure météo manquante rendrait
+# le modèle inexploitable pendant une semaine entière. À l'échelle horaire la
+# température est lisse -> combler les trous COURTS et INTERNES par
+# interpolation linéaire est légitime (et cohérent avec l'ingestion, cf.
+# `concat_all_data`). `limit_area="inside"` laisse volontairement les NaN de
+# fin de série : fabriquer l'heure la plus récente masquerait un retard
+# d'ingestion. Dans ce cas l'origine recule simplement d'une heure ou deux, ce
+# que `forecast_origin` rend explicite et que `scripts/forecast.py` contrôle.
+TEMP_MAX_GAP_HOURS = 6
+
 # Racine du projet : .../pipeline_prevision/utils/ml_utils/model/local_forecaster.py -> 5 niveaux
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__))))))
@@ -121,7 +134,24 @@ def _validate_target(target: str):
 def _build_series(observations: pd.DataFrame):
     series_by_target = build_series_by_target(observations)
     temp = pd.to_numeric(observations["temp"], errors="coerce")
+    temp = temp.interpolate(method="linear", limit=TEMP_MAX_GAP_HOURS, limit_area="inside")
     return series_by_target, temp
+
+
+def forecast_origin(prediction: pd.DataFrame) -> pd.Timestamp:
+    """Origine RÉELLEMENT utilisée par une prévision (`predict_direct` ou
+    `predict_with_conformal_intervals`), reconstruite depuis `target_ts - h`.
+
+    À ne pas confondre avec la dernière observation en base : le forecaster
+    s'ancre sur la dernière origine dont TOUTES les features sont calculables
+    (cf. `valid_features`), qui peut être plus ancienne si une série exogène
+    a un trou. Étiqueter la prévision avec la dernière observation alors que
+    le modèle s'est ancré ailleurs produit des horizons faux — négatifs si
+    l'écart dépasse l'horizon — d'où ce point d'accès explicite.
+    """
+    if prediction.empty:
+        raise ValueError("Prévision vide : aucune origine à en déduire")
+    return prediction.index[0] - pd.Timedelta(hours=int(prediction["horizon_h"].iloc[0]))
 
 
 def _direct_prediction(model, alpha: float, seasonal_weight: float,

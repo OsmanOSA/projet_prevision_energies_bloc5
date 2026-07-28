@@ -165,6 +165,18 @@ def save_forecasts(pred_df: pd.DataFrame, origin_ts, run_ts=None,
         for target_ts, row in pred_df.iterrows():
             target = pd.Timestamp(target_ts).to_pydatetime()
             horizon = int(round((target - origin).total_seconds() / 3600))
+            # Une prévision vise forcément l'avenir de son origine. Un horizon
+            # nul ou négatif signale que `origin_ts` et l'index de `pred_df` ne
+            # viennent pas du même ancrage (typiquement une origine étiquetée
+            # « dernière observation » alors que le modèle s'est ancré plus tôt,
+            # faute de features exogènes) : ces lignes passeraient toutes les
+            # contraintes SQL et ne se verraient qu'à l'affichage, sous la forme
+            # d'une courbe décalée de plusieurs jours.
+            if horizon <= 0:
+                raise ValueError(
+                    f"Horizon invalide ({horizon} h) : cible {target} antérieure ou égale "
+                    f"à l'origine {origin}. Prévision non persistée."
+                )
             for var in pred_df.columns:
                 val = row[var]
                 if pd.isna(val):

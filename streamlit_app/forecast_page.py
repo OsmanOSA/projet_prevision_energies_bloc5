@@ -261,9 +261,10 @@ def forecast():
     # Tableau détaillé
     with st.expander("Détail des valeurs prévues"):
         table = g[["target_ts", "horizon_h", "y_pred", "y_lower", "y_upper"]].copy()
-        table.columns = ["Horodatage", "Horizon (h)", "Prévision", "Borne basse", "Borne haute"]
-        numeric_columns = ["Prévision", "Borne basse", "Borne haute"]
-        table[numeric_columns] = table[numeric_columns].round(1)
+        numeric_columns = ["y_pred", "y_lower", "y_upper"]
+        table[numeric_columns] = (table[numeric_columns] / scale).round(2)
+        table.columns = ["Horodatage", "Horizon (h)", f"Prévision ({unit})",
+                         f"Borne basse ({unit})", f"Borne haute ({unit})"]
         st.dataframe(table, width="stretch", hide_index=True)
 
     _deficit_section(fc, obs)
