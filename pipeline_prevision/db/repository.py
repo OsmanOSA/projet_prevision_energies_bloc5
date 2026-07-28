@@ -8,7 +8,7 @@ import sys
 from datetime import datetime, timezone
 
 import pandas as pd
-from sqlalchemy import and_, inspect, select, text
+from sqlalchemy import and_, func, inspect, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from pipeline_prevision.db.config import get_engine
@@ -92,7 +92,17 @@ def upsert_observations(df: pd.DataFrame, source: str = "rte+meteostat") -> int:
             records.append(rec)
 
         stmt = pg_insert(observations).values(records)
-        update_cols = {DF_TO_DB[c]: stmt.excluded[DF_TO_DB[c]] for c in present}
+        # COALESCE : une valeur déjà connue n'est jamais écrasée par un NULL.
+        # Chaque ingestion rejoue une fenêtre glissante et ses lignes de bord
+        # arrivent forcément incomplètes (fenêtres RTE/Meteostat décalées,
+        # publication tardive d'une source) ; sans ce garde-fou, un simple
+        # rejeu détruit des observations valides — et un trou de `temp` suffit
+        # à invalider 168 h de features en aval. Une correction réelle (valeur
+        # non nulle) écrase toujours l'ancienne, comme attendu.
+        update_cols = {
+            DF_TO_DB[c]: func.coalesce(stmt.excluded[DF_TO_DB[c]], observations.c[DF_TO_DB[c]])
+            for c in present
+        }
         update_cols["source"] = stmt.excluded.source
         update_cols["ingested_at"] = datetime.now(timezone.utc)
         stmt = stmt.on_conflict_do_update(index_elements=["ts"], set_=update_cols)

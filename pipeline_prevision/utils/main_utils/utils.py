@@ -421,7 +421,20 @@ def concat_all_data(start_date, end_date):
     
     try:
 
-        df_temp = extract_temperature(start_date, end_date)
+        # Marge d'un jour de chaque côté sur la température : RTE est interrogé
+        # en heure locale (`...%2B02:00`) puis stocké en UTC naïf, alors que
+        # Meteostat est interrogé directement en UTC. La fenêtre RTE commence
+        # donc 2 h AVANT la fenêtre météo, et les 2 premières lignes de chaque
+        # ingestion n'avaient aucune température : `limit_area="inside"` les
+        # laisse NaN (ce sont des NaN de tête), et l'upsert écrasait alors des
+        # valeurs correctes par NULL. Un seul NaN de `temp` invalidant 168 h de
+        # features en aval (temp_lag_168), chaque ingestion sabotait la
+        # prévision. Le surplus est sans effet : `df_temp` est réaligné plus bas
+        # sur `full_index`, dérivé de la seule plage RTE.
+        margin = timedelta(days=1)
+        temp_start = (datetime.strptime(start_date, "%Y-%m-%d") - margin).strftime("%Y-%m-%d")
+        temp_end = (datetime.strptime(end_date, "%Y-%m-%d") + margin).strftime("%Y-%m-%d")
+        df_temp = extract_temperature(temp_start, temp_end)
         df_prod = extract_production(start_date, end_date)
         df_prod["timestamp"] = pd.to_datetime(df_prod["timestamp"], format="%Y-%m-%d %H:%M:%S")
         df_prod.set_index("timestamp", inplace=True)
