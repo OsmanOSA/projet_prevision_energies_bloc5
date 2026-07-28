@@ -8,7 +8,7 @@ import sys
 from datetime import datetime, timezone
 
 import pandas as pd
-from sqlalchemy import and_, inspect, select, text
+from sqlalchemy import and_, func, inspect, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from pipeline_prevision.db.config import get_engine
@@ -92,7 +92,17 @@ def upsert_observations(df: pd.DataFrame, source: str = "rte+meteostat") -> int:
             records.append(rec)
 
         stmt = pg_insert(observations).values(records)
-        update_cols = {DF_TO_DB[c]: stmt.excluded[DF_TO_DB[c]] for c in present}
+        # COALESCE : une valeur déjà connue n'est jamais écrasée par un NULL.
+        # Chaque ingestion rejoue une fenêtre glissante et ses lignes de bord
+        # arrivent forcément incomplètes (fenêtres RTE/Meteostat décalées,
+        # publication tardive d'une source) ; sans ce garde-fou, un simple
+        # rejeu détruit des observations valides — et un trou de `temp` suffit
+        # à invalider 168 h de features en aval. Une correction réelle (valeur
+        # non nulle) écrase toujours l'ancienne, comme attendu.
+        update_cols = {
+            DF_TO_DB[c]: func.coalesce(stmt.excluded[DF_TO_DB[c]], observations.c[DF_TO_DB[c]])
+            for c in present
+        }
         update_cols["source"] = stmt.excluded.source
         update_cols["ingested_at"] = datetime.now(timezone.utc)
         stmt = stmt.on_conflict_do_update(index_elements=["ts"], set_=update_cols)
@@ -155,6 +165,18 @@ def save_forecasts(pred_df: pd.DataFrame, origin_ts, run_ts=None,
         for target_ts, row in pred_df.iterrows():
             target = pd.Timestamp(target_ts).to_pydatetime()
             horizon = int(round((target - origin).total_seconds() / 3600))
+            # Une prévision vise forcément l'avenir de son origine. Un horizon
+            # nul ou négatif signale que `origin_ts` et l'index de `pred_df` ne
+            # viennent pas du même ancrage (typiquement une origine étiquetée
+            # « dernière observation » alors que le modèle s'est ancré plus tôt,
+            # faute de features exogènes) : ces lignes passeraient toutes les
+            # contraintes SQL et ne se verraient qu'à l'affichage, sous la forme
+            # d'une courbe décalée de plusieurs jours.
+            if horizon <= 0:
+                raise ValueError(
+                    f"Horizon invalide ({horizon} h) : cible {target} antérieure ou égale "
+                    f"à l'origine {origin}. Prévision non persistée."
+                )
             for var in pred_df.columns:
                 val = row[var]
                 if pd.isna(val):
