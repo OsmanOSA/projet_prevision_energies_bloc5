@@ -155,11 +155,19 @@ python -m scripts.retrain          # entraîne un challenger et le promeut s'il 
 ### Scripts opérationnels (préfigurent les DAGs Airflow)
 
 ```bash
+python -m scripts.seed_observations               # peuple `observations` depuis datasets/data.csv, puis complète via RTE
 python -m scripts.ingest 2024-01-01 2024-01-07   # ingestion d'une période
 python -m scripts.forecast 24                     # prévision J+1 (horizon en heures)
 python -m scripts.evaluate                        # évaluation prévu vs réalisé
 python -m scripts.backfill_forecasts 30 24         # rejoue des prévisions historiques
 ```
+
+`seed_observations` est le point d'entrée du démarrage à froid : `datasets/data.csv`
+est le seul historique versionné (et celui sur lequel le modèle en production a été
+entraîné). Il inscrit la provenance dans la colonne `source` (`data.csv:<sha8>`), puis
+contrôle continuité, bornes physiques et complétude. `--remplacer` réaligne la plage du
+CSV sur son contenu exact — après archivage compressé systématique — quand la table
+contient des valeurs aberrantes ou d'origine inconnue ; `--sans-rte` s'en tient au CSV.
 
 ### Qualité
 
