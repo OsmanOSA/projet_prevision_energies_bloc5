@@ -31,6 +31,13 @@ candidate_models/
 models_archive/
 Artifacts/
 
+# Notebooks d'exploration : sorties incluses, ils pesaient 27 Mo de blobs
+# dans l'historique pour ~27 Mo de dépôt total. Le travail qui doit survivre
+# à une exploration est repris en script (`scripts/`) ou en note (`docs/`),
+# qui se relisent et se diffent ; un .ipynb versionné ne fait ni l'un ni
+# l'autre. Les fichiers restent en local.
+notebooks/
+
 # Sauvegardes locales de debug (jamais des artefacts à versionner)
 datasets/*.bak*
 
