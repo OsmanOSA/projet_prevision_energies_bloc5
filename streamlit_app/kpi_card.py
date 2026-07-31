@@ -56,13 +56,37 @@ def windowed_delta(obs_all: pd.DataFrame, column: str, days: int, agg: str = "me
     return value, delta_pct
 
 
+def _delta_tooltip(delta_pct: float, higher_is_better: bool, is_improving: bool,
+                   period_label: str) -> str:
+    """Texte d'infobulle explicitant le badge de variation.
+
+    La couleur n'est pas devinable sans elle : le vert suit le sens
+    FAVORABLE de l'indicateur, pas le signe de la variation. Une baisse de
+    consommation et une hausse de production sont toutes deux vertes, ce qui
+    laisse croire à tort que le vert signale une baisse.
+    """
+    sens = "Hausse" if delta_pct >= 0 else "Baisse"
+    jugement = "favorable" if is_improving else "défavorable"
+    souhaitable = "hausse" if higher_is_better else "baisse"
+    # « vs » plutôt que « par rapport à » : l'étiquette de période est fournie
+    # par l'appelant et la contraction à/aux serait fausse une fois sur deux.
+    return (f"{sens} de {abs(delta_pct):.1f} % vs {period_label} "
+            f"— évolution {jugement} : pour cet indicateur, une {souhaitable} "
+            f"est souhaitable.")
+
+
 def kpi_card(label: str, value: str, delta_pct: float | None = None, sub: str = "",
-            higher_is_better: bool = True, key: str | None = None):
+            higher_is_better: bool = True, key: str | None = None,
+            period_label: str = "la période précédente de même durée"):
     """Carte KPI. `delta_pct` omis -> rendu simple (label/valeur/sub).
 
     `higher_is_better` fixe le sens de la couleur : True (par défaut, ex.
     production) -> hausse verte ; False (ex. consommation, où moins consommer
     est préférable) -> hausse rouge.
+
+    `period_label` : période de comparaison, telle qu'elle apparaît dans
+    l'infobulle. À préciser (« les 7 derniers jours ») quand la page connaît
+    sa fenêtre, sinon la formulation générique par défaut s'applique.
 
     `key` : à fournir explicitement si plusieurs cartes de la même page
     partagent le même `label` (la clé du conteneur Streamlit, sinon dérivée
@@ -92,12 +116,16 @@ def kpi_card(label: str, value: str, delta_pct: float | None = None, sub: str = 
         is_improving = delta_pct >= 0 if higher_is_better else delta_pct <= 0
         color = _GOOD if is_improving else _BAD
         arrow = "↑" if delta_pct >= 0 else "↓"
+        # `title` natif plutôt qu'un tooltip Streamlit : aucun coût de mise en
+        # page dans une rangée de cartes déjà dense, et `cursor:help` signale
+        # au survol qu'une explication existe.
+        tooltip = _delta_tooltip(delta_pct, higher_is_better, is_improving, period_label)
         st.markdown(
             f"""
             <div style="display:flex; align-items:baseline; gap:8px; margin-top:2px;">
                 <span style="font-size:1.4rem; font-weight:700; color:var(--ink); white-space:nowrap;">{value}</span>
-                <span style="font-size:0.76rem; font-weight:700; color:{color}; background:{_hex_to_rgba(color, 0.12)};
-                            border-radius:999px; padding:2px 8px; white-space:nowrap;">{arrow} {abs(delta_pct):.1f}%</span>
+                <span title="{tooltip}" style="font-size:0.76rem; font-weight:700; color:{color}; background:{_hex_to_rgba(color, 0.12)};
+                            border-radius:999px; padding:2px 8px; white-space:nowrap; cursor:help;">{arrow} {abs(delta_pct):.1f}%</span>
             </div>
             <div style="font-size:0.72rem; color:var(--faint); margin-top:2px;">{sub}&nbsp;</div>
             """,

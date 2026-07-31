@@ -59,16 +59,18 @@ def consumption():
     _, peak_delta = windowed_delta(obs_all, "consommation_totale", days, agg="max")
     _, base_delta = windowed_delta(obs_all, "consommation_totale", days, agg="min")
 
+    periode = f"les {days} jours précédents"
+
     k1, k2, k3, k4, k5 = st.columns(5)
     with k1:
         kpi_card("Consommation moy.", f"{avg_conso / 1000:,.2f} GW".replace(",", " "),
-                 delta_pct=avg_delta, higher_is_better=False)
+                 delta_pct=avg_delta, higher_is_better=False, period_label=periode)
     with k2:
         kpi_card("Pic", f"{conso.max() / 1000:,.2f} GW".replace(",", " "), delta_pct=peak_delta,
-                 sub=peak_ts.strftime("%d/%m %Hh"), higher_is_better=False)
+                 sub=peak_ts.strftime("%d/%m %Hh"), higher_is_better=False, period_label=periode)
     with k3:
         kpi_card("Base (min)", f"{conso.min() / 1000:,.2f} GW".replace(",", " "), delta_pct=base_delta,
-                 higher_is_better=False)
+                 higher_is_better=False, period_label=periode)
     with k4:
         kpi_card("Thermosensibilité", f"{slope / 1000:+.2f} GW/°C" if pd.notna(slope) else "—")
     with k5:
