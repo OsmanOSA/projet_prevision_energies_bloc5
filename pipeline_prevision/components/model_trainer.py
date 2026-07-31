@@ -23,6 +23,7 @@ from pipeline_prevision.entity.config_entity import ModelTrainerConfig
 from pipeline_prevision.utils.main_utils.utils import save_object, load_object
 from pipeline_prevision.utils.main_utils.feature_engineering import (
     HORIZON_MAX, ALPHA_GRID, SEASONAL_WEIGHT_GRID, TARGET_PREFIXES, add_target_features, seasonal_baseline,
+    ANCHOR_NAMES, DEFAULT_ANCHOR, anchor_values, complementary_anchor,
 )
 
 # NB : optuna est importé paresseusement (dans _tune_hyperparameters) afin que
@@ -45,6 +46,18 @@ MAX_ESTIMATORS_FINAL = 4000
 EARLY_STOPPING_TUNING = 80
 EARLY_STOPPING_FINAL = 150
 RANDOM_STATE = 42
+
+
+def _force_utf8_streams():
+    """MLflow écrit des emojis sur stdout en fermant un run ; sous Windows la
+    console est en cp1252 et lève UnicodeEncodeError. À appeler avant toute
+    section MLflow."""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
 
 
 def _global_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> tuple[float, float]:
@@ -73,12 +86,7 @@ class ModelTrainer:
         échouer l'entraînement."""
         import mlflow
 
-        for stream in (sys.stdout, sys.stderr):
-            if hasattr(stream, "reconfigure"):
-                try:
-                    stream.reconfigure(encoding="utf-8", errors="replace")
-                except Exception:
-                    pass
+        _force_utf8_streams()
 
         mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000"))
         mlflow.set_experiment(os.getenv("MLFLOW_EXPERIMENT", "energia_forecasting"))
@@ -99,6 +107,82 @@ class ModelTrainer:
                 "persistence_mae": global_metrics["persistence_mae"],
                 "gain_vs_persistence_pct": global_metrics["gain_vs_persistence_pct"],
             })
+
+    def register_mlflow_model(self, model_path: str, metadata_path: str, metadata: dict,
+                              alias: str = "challenger", extra_tags: dict | None = None):
+        """Enregistre le composite au Model Registry et y pose un alias.
+
+        `alias` vaut `challenger` pour un modèle qui sort d'entraînement ; on
+        passe `champion` pour rattacher au registre un artefact déjà servi
+        (enregistrement rétroactif — le numéro de version reflète alors
+        l'ordre d'enregistrement, pas l'ordre d'entraînement, d'où le tag
+        `trained_at_utc` qui seul fait foi sur l'ancienneté).
+
+        Les runs de `track_mlflow` sont par cible ; le composite, lui, n'existe
+        qu'une fois les 5 cibles entraînées -> un run dédié, ouvert ici, porte
+        l'artefact complet. `mlflow.sklearn.log_model` ne sait pas représenter
+        un dict de 120 modèles + alphas + poids saisonniers : on enregistre
+        donc `model.pkl` et `metadata.json` comme artefacts bruts, puis on crée
+        la version via `create_model_version` sur l'URI d'artefact. (Depuis
+        MLflow 3.x, `register_model("runs:/…")` exige un *logged model* produit
+        par `log_model` et refuse un simple dossier d'artefacts.)
+
+        Sans cet enregistrement, `scripts/retrain._promote_mlflow_alias` posait
+        l'alias `champion` sur la dernière version connue du registre — un
+        artefact sans lien avec le modèle qui venait d'être entraîné.
+
+        Le tag `model_version` reprend le SHA-256 tronqué de `model.pkl`, ce
+        qui relie la version du registre à l'artefact réellement servi par
+        `local_forecaster.get_model_version`. Non bloquant : un registre
+        indisponible ne doit jamais faire échouer l'entraînement.
+        """
+        import mlflow
+        from mlflow.tracking import MlflowClient
+
+        _force_utf8_streams()
+
+        mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000"))
+        mlflow.set_experiment(os.getenv("MLFLOW_EXPERIMENT", "energia_forecasting"))
+        name = os.getenv("MLFLOW_MODEL_NAME", "energia_forecasting_model")
+
+        run_name = f"composite-{metadata['architecture']}-{datetime.now():%Y%m%d_%H%M%S}"
+        with mlflow.start_run(run_name=run_name) as run:
+            mlflow.set_tags({
+                "model_family": "LightGBM-direct-residual",
+                "scope": "composite",
+                "trigger": os.getenv("RETRAIN_TRIGGER", "manual"),
+                "model_version": metadata["model_version"],
+                "trained_at_utc": metadata["trained_at_utc"],
+                "git_commit": metadata.get("git_commit") or "inconnu",
+                "horizon_max": HORIZON_MAX,
+                "targets": ",".join(metadata["targets"]),
+                **(extra_tags or {}),
+            })
+            mlflow.log_artifact(model_path, artifact_path="model")
+            mlflow.log_artifact(metadata_path, artifact_path="model")
+            mlflow.log_metrics({
+                f"{target}_mae": target_metadata["global"]["model_mae"]
+                for target, target_metadata in metadata["per_target"].items()
+            })
+            mlflow.log_metrics({
+                f"{target}_gain_vs_persistence_pct": target_metadata["global"]["gain_vs_persistence_pct"]
+                for target, target_metadata in metadata["per_target"].items()
+            })
+            run_id, artifact_uri = run.info.run_id, run.info.artifact_uri
+
+        client = MlflowClient()
+        try:
+            client.create_registered_model(name)
+        except Exception:
+            pass  # déjà créé par un run précédent
+        version = client.create_model_version(
+            name=name, source=f"{artifact_uri}/model", run_id=run_id
+        ).version
+        client.set_registered_model_alias(name, alias, version)
+
+        logging.info("MLflow : version %s enregistrée et marquée `%s`", version, alias)
+        print(f"MLflow : version {version} enregistrée et marquée `{alias}`")
+        return version
 
     def _tune_hyperparameters(self, development: pd.DataFrame, feature_columns: list[str],
                               prefix: str, delta_col: str):
@@ -208,7 +292,7 @@ class ModelTrainer:
         pour fixer le nombre d'arbres, grid-search (alpha, poids saisonnier)
         sur validation, réentraînement final sur train+valid, évaluation sur
         test jamais vu pendant la sélection."""
-        models, alphas, seasonal_weights, best_iterations = {}, {}, {}, {}
+        models, alphas, seasonal_weights, best_iterations, anchors = {}, {}, {}, {}, {}
         results = []
         importances = []
 
@@ -225,47 +309,65 @@ class ModelTrainer:
             X_valid = add_target_features(valid[feature_columns], horizon, delta_col)
             X_test = add_target_features(test[feature_columns], horizon, delta_col)
 
-            residual_train = train[target_name] - train[f"{prefix}_0"]
-            residual_valid = valid[target_name] - valid[f"{prefix}_0"]
-
-            temp_model = LGBMRegressor(**best_params)
-            temp_model.fit(
-                X_train, residual_train,
-                eval_set=[(X_valid, residual_valid)],
-                eval_metric="mae",
-                callbacks=[
-                    early_stopping(stopping_rounds=EARLY_STOPPING_FINAL,
-                                  first_metric_only=True, verbose=False),
-                    log_evaluation(period=0),
-                ],
-            )
-
-            best_iteration = temp_model.best_iteration_
-            if not best_iteration or best_iteration <= 0:
-                best_iteration = MAX_ESTIMATORS_FINAL
-
-            predicted_residual_valid = temp_model.predict(X_valid, num_iteration=best_iteration)
-            persistence_valid = valid[f"{prefix}_0"].to_numpy()
-            seasonal_valid = seasonal_baseline(valid, horizon, prefix)
             y_valid = valid[target_name].to_numpy()
 
+            # Sélection conjointe (ancre, alpha, poids de mélange) sur la
+            # validation. L'ancre n'est pas un post-traitement : elle définit
+            # la cible résiduelle apprise, donc chaque candidate exige son
+            # propre entraînement (cf. feature_engineering.ANCHOR_NAMES).
             best_validation_mae = np.inf
-            best_alpha = 1.0
-            best_seasonal_weight = 0.0
-            for alpha in ALPHA_GRID:
-                direct_prediction = persistence_valid + alpha * predicted_residual_valid
-                for seasonal_weight in SEASONAL_WEIGHT_GRID:
-                    prediction_valid = (
-                        (1 - seasonal_weight) * direct_prediction + seasonal_weight * seasonal_valid
-                    )
-                    score = mean_absolute_error(y_valid, prediction_valid)
-                    if score < best_validation_mae:
-                        best_validation_mae = score
-                        best_alpha = float(alpha)
-                        best_seasonal_weight = float(seasonal_weight)
+            best_anchor, best_alpha, best_seasonal_weight = DEFAULT_ANCHOR, 1.0, 0.0
+            best_iteration = MAX_ESTIMATORS_FINAL
 
+            for anchor in ANCHOR_NAMES:
+                base_train = anchor_values(train, horizon, prefix, anchor)
+                base_valid = anchor_values(valid, horizon, prefix, anchor)
+                blend_valid = anchor_values(valid, horizon, prefix, complementary_anchor(anchor))
+
+                residual_train = train[target_name].to_numpy() - base_train
+                residual_valid = valid[target_name].to_numpy() - base_valid
+
+                temp_model = LGBMRegressor(**best_params)
+                temp_model.fit(
+                    X_train, residual_train,
+                    eval_set=[(X_valid, residual_valid)],
+                    eval_metric="mae",
+                    callbacks=[
+                        early_stopping(stopping_rounds=EARLY_STOPPING_FINAL,
+                                      first_metric_only=True, verbose=False),
+                        log_evaluation(period=0),
+                    ],
+                )
+
+                iteration = temp_model.best_iteration_
+                if not iteration or iteration <= 0:
+                    iteration = MAX_ESTIMATORS_FINAL
+
+                predicted_residual_valid = temp_model.predict(X_valid, num_iteration=iteration)
+
+                for alpha in ALPHA_GRID:
+                    direct_prediction = base_valid + alpha * predicted_residual_valid
+                    for seasonal_weight in SEASONAL_WEIGHT_GRID:
+                        prediction_valid = (
+                            (1 - seasonal_weight) * direct_prediction + seasonal_weight * blend_valid
+                        )
+                        score = mean_absolute_error(y_valid, prediction_valid)
+                        if score < best_validation_mae:
+                            best_validation_mae = score
+                            best_anchor = anchor
+                            best_alpha = float(alpha)
+                            best_seasonal_weight = float(seasonal_weight)
+                            best_iteration = int(iteration)
+
+                del temp_model
+                gc.collect()
+
+            # Réentraînement final sur train+valid avec l'ancre retenue.
             X_final = pd.concat([X_train, X_valid], axis=0)
-            residual_final = pd.concat([residual_train, residual_valid], axis=0)
+            residual_final = np.concatenate([
+                train[target_name].to_numpy() - anchor_values(train, horizon, prefix, best_anchor),
+                valid[target_name].to_numpy() - anchor_values(valid, horizon, prefix, best_anchor),
+            ])
 
             final_params = dict(best_params)
             final_params["n_estimators"] = int(best_iteration)
@@ -273,13 +375,15 @@ class ModelTrainer:
             final_model.fit(X_final, residual_final)
 
             predicted_residual_test = final_model.predict(X_test)
+            base_test = anchor_values(test, horizon, prefix, best_anchor)
+            blend_test = anchor_values(test, horizon, prefix, complementary_anchor(best_anchor))
             persistence_test = test[f"{prefix}_0"].to_numpy()
             seasonal_test = seasonal_baseline(test, horizon, prefix)
             y_test = test[target_name].to_numpy()
 
-            direct_prediction_test = persistence_test + best_alpha * predicted_residual_test
+            direct_prediction_test = base_test + best_alpha * predicted_residual_test
             prediction_test = (
-                (1 - best_seasonal_weight) * direct_prediction_test + best_seasonal_weight * seasonal_test
+                (1 - best_seasonal_weight) * direct_prediction_test + best_seasonal_weight * blend_test
             )
             prediction_test = np.maximum(prediction_test, 0)
 
@@ -301,9 +405,11 @@ class ModelTrainer:
             alphas[horizon] = best_alpha
             seasonal_weights[horizon] = best_seasonal_weight
             best_iterations[horizon] = int(best_iteration)
+            anchors[horizon] = best_anchor
 
             results.append({
                 "horizon": horizon,
+                "anchor": best_anchor,
                 "mae_validation": float(best_validation_mae),
                 "mae_model": mae_model,
                 "rmse_model": rmse_model,
@@ -324,11 +430,11 @@ class ModelTrainer:
             }))
 
             logging.info(
-                "%s horizon %02d/%d -> MAE=%.2f gain=%+.2f%% alpha=%.2f saisonnier=%.2f arbres=%s",
-                prefix, horizon, HORIZON_MAX, mae_model, gain, best_alpha, best_seasonal_weight, best_iteration,
+                "%s horizon %02d/%d -> MAE=%.2f gain=%+.2f%% ancre=%s alpha=%.2f mélange=%.2f arbres=%s",
+                prefix, horizon, HORIZON_MAX, mae_model, gain, best_anchor,
+                best_alpha, best_seasonal_weight, best_iteration,
             )
 
-            del temp_model
             gc.collect()
 
         model_mae, model_rmse = _global_metrics(y_true_matrix, pred_model_matrix)
@@ -347,6 +453,7 @@ class ModelTrainer:
             "models": models,
             "alphas": alphas,
             "seasonal_weights": seasonal_weights,
+            "anchors": anchors,
             "best_iterations": best_iterations,
             "feature_columns": feature_columns,
             "prefix": prefix,
@@ -405,6 +512,15 @@ class ModelTrainer:
 
             with open(model_path, "rb") as model_file:
                 model_sha256 = hashlib.sha256(model_file.read()).hexdigest()
+
+            # Colonne de température effectivement apprise, transmise par la
+            # transformation : les features portent toutes le préfixe "temp_"
+            # quelle que soit leur source. Repli sur "temp" pour les bundles
+            # produits avant l'introduction de `temp_fr`.
+            exogenous_column = next(
+                (bundle[t].get("exogenous_column") for t in FEATURE_NAMES
+                 if bundle[t].get("exogenous_column")), "temp")
+
             dataset_hashes = {}
             for dataset_path in sorted(training_pipeline.PATH_FILE_DATASET.glob("*.csv")):
                 with open(dataset_path, "rb") as dataset_file:
@@ -425,9 +541,16 @@ class ModelTrainer:
                 "git_commit": git_commit,
                 "dataset_sha256": dataset_hashes,
                 "architecture": "direct_multihorizon_residual",
+                "anchor_candidates": list(ANCHOR_NAMES),
                 "horizon_max": HORIZON_MAX,
                 "targets": FEATURE_NAMES,
-                "exogenous": ["temp"],
+                # Déduit de la colonne réellement consommée, jamais codé en dur :
+                # `select_temperature` bascule de `temp` (station unique) vers
+                # `temp_fr` (moyenne France pondérée) dès que la couverture le
+                # permet, et se replie silencieusement sinon. Une métadonnée figée
+                # affirmerait `temp` alors que le modèle a appris sur `temp_fr` --
+                # et la traçabilité d'un artefact ne vaut que si elle ne ment pas.
+                "exogenous": [exogenous_column],
                 "per_target": metadata_per_target,
                 "test_protocol": "holdout chronologique purgé (embargo 24h), jamais utilisé pour la sélection",
                 "runtime": {
@@ -446,6 +569,11 @@ class ModelTrainer:
             artifact_metadata_path = os.path.join(model_dir_path, "metadata.json")
             with open(artifact_metadata_path, "w", encoding="utf-8") as metadata_file:
                 json.dump(metadata, metadata_file, ensure_ascii=False, indent=2)
+
+            try:
+                self.register_mlflow_model(model_path, metadata_file_path, metadata)
+            except Exception as registry_error:
+                logging.warning("Enregistrement MLflow ignoré : %s", registry_error)
 
             model_trainer_artifact = ModelTrainerArtifact(
                 trained_model_file_path=self.model_trainer_config.trained_model_file_path,

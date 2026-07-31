@@ -16,6 +16,39 @@ from pipeline_prevision.logging.logger import logging
 from pipeline_prevision.constant.training_pipeline import SCHEMA_FILE_PATH
 from pipeline_prevision.utils.main_utils.utils import read_yaml_file, write_yaml_file
 
+# Colonnes qui peuvent légitimement être négatives : les températures. Toutes
+# les autres variables du schéma sont des puissances (MW), pour lesquelles une
+# valeur négative signale une anomalie d'ingestion.
+SIGNED_COLUMNS = frozenset({"temp", "temp_fr", "temp_fr_om", "temp_fr_prev"})
+
+# Fraction de valeurs manquantes TOLÉRÉE, par colonne. Le défaut reste 0 : toute
+# autre colonne provient de RTE ou de Meteostat, où un trou signale une anomalie
+# d'ingestion qui doit échouer bruyamment. Les deux exceptions ci-dessous sont
+# des absences STRUCTURELLES de l'archive Open-Meteo, pas des incidents, et les
+# plafonds sont serrés pour qu'un trou nouveau et plus large échoue quand même.
+#
+# Dans les deux cas, combler serait pire que laisser vide :
+#   - recopier `temp_fr` (Meteostat) mélangerait les sources, alors que tout le
+#     dispositif vise justement à ce que l'origine et la cible viennent de la
+#     même grille (biais grille/station non stationnaire : 0,78 °C selon l'heure,
+#     0,63 °C selon le niveau de température) ;
+#   - recopier l'observé dans `temp_fr_prev` y introduirait une météo future
+#     parfaite, exactement la fuite qu'on cherche à éviter ;
+#   - interpoler 20 jours de température n'a aucun sens physique (le seuil de
+#     comblement du pipeline est de 6 h, cf. TEMP_MAX_GAP_HOURS).
+# Les lignes concernées tombent au `dropna` de data_transformation : coût mesuré
+# 516 origines sur 30 998, soit 1,7 %.
+MISSING_TOLERANCE = {
+    # L'archive Open-Meteo commence au 2023-01-01 : les heures antérieures du jeu
+    # (une seule, 2022-12-31 23:00) ne peuvent pas exister. Elle serait de toute
+    # façon écartée par les lags, qui ne rendent exploitable qu'à partir du
+    # 2023-01-14.
+    "temp_fr_om": 0.005,
+    # Trou réel de 492 h contiguës dans l'archive des prévisions
+    # (2023-12-30 -> 2024-01-19), soit 1,58 % du jeu.
+    "temp_fr_prev": 0.05,
+}
+
 
 class DataValidation:
     """Valide le schéma, la chronologie et la qualité des trois partitions."""
@@ -93,8 +126,23 @@ class DataValidation:
         missing_values = {
             column: int(dataframe[column].isna().sum()) for column in common
         }
-        if any(missing_values.values()):
-            errors.append(f"valeurs manquantes: {missing_values}")
+        # Un trou est une erreur SAUF sur les colonnes à tolérance déclarée, où il
+        # reste signalé en avertissement : la donnée n'est jamais corrigée en
+        # silence, mais un manque connu et borné n'interrompt pas l'entraînement.
+        fautifs, toleres = {}, {}
+        for column, manquants in missing_values.items():
+            if not manquants:
+                continue
+            plafond = MISSING_TOLERANCE.get(column, 0.0) * max(len(dataframe), 1)
+            (toleres if manquants <= plafond else fautifs)[column] = manquants
+        if fautifs:
+            errors.append(f"valeurs manquantes: {fautifs}")
+        if toleres:
+            warnings.append(
+                "valeurs manquantes tolérées: "
+                + ", ".join(f"{c}={n} ({n / max(len(dataframe), 1):.2%}, "
+                            f"plafond {MISSING_TOLERANCE[c]:.2%})"
+                            for c, n in toleres.items()))
 
         infinite_values = {}
         for column in common:
@@ -105,7 +153,12 @@ class DataValidation:
         if any(infinite_values.values()):
             errors.append(f"valeurs infinies: {infinite_values}")
 
-        for column in [name for name in common if name != "temp"]:
+        # Les températures sont les seules grandeurs légitimement négatives :
+        # `temp` (station unique) comme `temp_fr` (moyenne France pondérée, qui
+        # descend à -4,3 °C en vague de froid). Les bornes basses réelles sont
+        # contrôlées par `plausible_bounds` juste en dessous, pas ici. Une
+        # production ou une consommation négative, elle, reste une anomalie.
+        for column in [name for name in common if name not in SIGNED_COLUMNS]:
             count = int((dataframe[column] < 0).sum())
             if count:
                 errors.append(f"{column}: {count} valeur(s) négative(s)")

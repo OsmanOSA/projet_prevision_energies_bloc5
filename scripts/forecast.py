@@ -121,22 +121,23 @@ def origins_by_target(per_target: dict, expected_origin: pd.Timestamp) -> dict:
 
 
 def frames_for_origin(per_target: dict, targets: list, with_production_total: bool) -> tuple:
-    """(pred, lower, upper) pour un groupe de cibles partageant une origine.
+    """(pred, lower, upper, decision) pour un groupe de cibles partageant une origine.
 
     `production_total` n'est reconstruit que si les 4 sources sont dans ce
     groupe : les sommer à travers des origines différentes ne ferait que
     produire des NaN sur l'intersection vide des `target_ts`, soit un total
     silencieusement tronqué.
     """
-    columns = {key: {t: per_target[t][key] for t in targets}
-               for key in ("y_pred", "y_lower", "y_upper")}
+    cles = ("y_pred", "y_lower", "y_upper", "y_decision")
+    columns = {key: {t: per_target[t][key] for t in targets} for key in cles}
 
     if with_production_total:
         derived = derive_production_total(per_target)
         for key in columns:
-            columns[key]["production_total"] = derived[key]
+            if key in derived:
+                columns[key]["production_total"] = derived[key]
 
-    return tuple(pd.concat(columns[key], axis=1) for key in ("y_pred", "y_lower", "y_upper"))
+    return tuple(pd.concat(columns[key], axis=1) for key in cles)
 
 
 def run(horizon: int = 24) -> int:
@@ -184,12 +185,18 @@ def run(horizon: int = 24) -> int:
         n = 0
         for origin_ts in sorted(set(origins.values())):
             targets = sorted(t for t, o in origins.items() if o == origin_ts)
-            pred_df, lower_df, upper_df = frames_for_origin(
+            pred_df, lower_df, upper_df, decision_df = frames_for_origin(
                 per_target, targets,
                 with_production_total=set(PRODUCTION_SOURCES).issubset(targets),
             )
+            # Quantile appliqué par variable : sans lui, `y_decision` devient
+            # ininterprétable dès que les coûts de déséquilibre changent.
+            quantiles = {t: float(per_target[t]["decision_q"].iloc[0])
+                         for t in targets
+                         if pd.notna(per_target[t]["decision_q"].iloc[0])}
             n += save_forecasts(pred_df, origin_ts=origin_ts, model_version=model_version,
-                                lower_df=lower_df, upper_df=upper_df)
+                                lower_df=lower_df, upper_df=upper_df,
+                                decision_df=decision_df, decision_q=quantiles)
 
         resume = " · ".join(f"{t}@{o:%Y-%m-%d %H:%M}" for t, o in sorted(origins.items()))
         # Le report est consigné dans `pipeline_runs` : une prévision dont

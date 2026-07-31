@@ -6,6 +6,7 @@ import pandas as pd
 from pipeline_prevision.utils.main_utils.utils import save_object
 from pipeline_prevision.utils.main_utils.feature_engineering import (
     HORIZON_MAX, build_features_for_target, build_series_by_target, TARGET_PREFIXES,
+    select_temperature, select_forecast_temperature,
 )
 from pipeline_prevision.exception.exception import ForecastingException
 from pipeline_prevision.logging.logger import logging
@@ -75,12 +76,21 @@ class DataTransformation:
             full = full[~full.index.duplicated(keep="last")].asfreq("h")
 
             series_by_target = build_series_by_target(full)
-            temp = pd.to_numeric(full["temp"], errors="coerce")
+            temp = select_temperature(full)
+            # Température PRÉVUE à l'heure cible. None si `datasets/data.csv` est
+            # antérieur au backfill : les features cible sont alors absentes et
+            # l'entraînement reproduit le comportement d'avant, sans erreur. Le
+            # CSV doit donc porter la colonne, sinon l'entraînement (qui lit le
+            # CSV) diverge de l'inférence (qui lit la base) — cf.
+            # `python -m scripts.backfill_prevision_temperature --csv`.
+            temp_prev = select_forecast_temperature(full)
+            logging.info("Température prévue à l'heure cible : %s",
+                         "disponible" if temp_prev is not None else "ABSENTE (features cible désactivées)")
 
             bundle = {}
             for target_column in TARGET_COLUMNS:
                 features_df, prefix, target_columns = build_features_for_target(
-                    series_by_target, temp, target_column
+                    series_by_target, temp, target_column, temp_prev=temp_prev
                 )
                 feature_columns = [c for c in features_df.columns if c not in target_columns]
 
@@ -99,6 +109,11 @@ class DataTransformation:
 
                 bundle[target_column] = {
                     "prefix": prefix,
+                    # Nom de la série exogène réellement utilisée (`temp` ou
+                    # `temp_fr`) : les colonnes de features sont toutes préfixées
+                    # "temp_" quelle que soit la source, donc c'est le seul
+                    # endroit où l'information survit jusqu'aux métadonnées.
+                    "exogenous_column": getattr(temp, "name", None),
                     "feature_columns": feature_columns,
                     "target_columns": target_columns,
                     "train": train,

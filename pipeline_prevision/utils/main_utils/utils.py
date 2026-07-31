@@ -10,6 +10,7 @@ import dill
 
 from datetime import datetime, timedelta
 from typing import Tuple, List, Literal
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from pipeline_prevision.exception.exception import ForecastingException
 from pipeline_prevision.logging.logger import logging
@@ -206,7 +207,13 @@ def extract_conso(start_date: str, end_date: str):
                     }
 
         for start, end in daterange(start_date, end_date, SIX_MONTHS):
-            url = f"{BASE_URL}&start_date={start.isoformat()}%2B02:00&end_date={end.isoformat()}%2B02:00"
+            # Décalage RÉEL de Paris à chaque borne (cf. `_offset_paris_url`) : figé
+            # à +02:00, l'appel perdait 24 h par fenêtre en heure d'hiver — mesuré
+            # 216 h renvoyées sur 240 demandées en janvier, contre 240/240 en
+            # juillet. Sans conséquence tant qu'on n'ingérait que les derniers
+            # jours en été ; destructeur sur un backfill pluriannuel.
+            url = (f"{BASE_URL}&start_date={start.isoformat()}{_offset_paris_url(start)}"
+                   f"&end_date={end.isoformat()}{_offset_paris_url(end)}")
             response = requests.get(url, headers=headers)
 
             if response.status_code == 200:
@@ -232,6 +239,94 @@ def extract_conso(start_date: str, end_date: str):
     
     except Exception as e:
         raise ForecastingException(e, sys)
+
+
+# Largeur maximale d'une fenêtre acceptée par l'API Consumption de RTE, mesurée :
+# 31 jours passent (2 976 points), 90 jours -> HTTP 400 CONSUMPTION_SHORTTERM_F04.
+RTE_MAX_WINDOW_DAYS = 31
+
+
+def extract_conso_forecast_rte_range(start_date: str, end_date: str,
+                                     verbeux: bool = False) -> pd.DataFrame:
+    """Prévisions RTE J-1 sur une PLAGE de jours (bornes incluses, AAAA-MM-JJ).
+
+    Même contenu que `extract_conso_forecast_rte`, mais en une poignée de
+    requêtes au lieu d'une par jour : l'API accepte des fenêtres allant jusqu'à
+    31 jours (mesuré : 2 976 points en 0,7 s ; 90 jours -> HTTP 400
+    CONSUMPTION_SHORTTERM_F04). Rétro-alimenter 3,5 ans revient ainsi à ~43
+    appels au lieu de ~1 300.
+
+    Sert le **repère externe** : la prévision RTE n'entre jamais dans nos
+    features ni dans l'entraînement (cf. `scripts/fetch_rte_forecast.py`). Un
+    historique long est indispensable pour savoir si un écart avec RTE est réel
+    ou du bruit -- 6 origines n'autorisent aucune conclusion.
+
+    Retourne un DataFrame horaire indexé en UTC naïf (convention du pipeline).
+    """
+    try:
+        token_url = os.getenv("URL_TOKEN")
+        reponse = requests.post(token_url, data={"grant_type": "client_credentials"},
+                                auth=(os.getenv("CLIENT_ID"), os.getenv("CLIENT_SECRET")))
+        token = reponse.json().get("access_token")
+        base = os.getenv("BASE_URL_CONSO_FORECAST")
+        entetes = {"Host": "digital.iservices.rte-france.com",
+                   "Authorization": f"Bearer {token}"}
+
+        debut = datetime.strptime(start_date, "%Y-%m-%d")
+        # +1 j : la borne de fin est exclusive côté RTE, on veut `end_date` entier.
+        fin = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+
+        morceaux = []
+        curseur = debut
+        while curseur < fin:
+            tranche_fin = min(curseur + timedelta(days=RTE_MAX_WINDOW_DAYS), fin)
+            url = (f"{base}"
+                   f"&start_date={curseur.isoformat()}{_offset_paris_url(curseur)}"
+                   f"&end_date={tranche_fin.isoformat()}{_offset_paris_url(tranche_fin)}")
+            r = requests.get(url, headers=entetes)
+            if r.status_code != 200:
+                raise ValueError(f"Requête RTE échouée ({curseur:%Y-%m-%d} -> "
+                                 f"{tranche_fin:%Y-%m-%d}) : {r.text[:200]}")
+
+            dates, valeurs = [], []
+            for bloc in r.json().get("short_term", []):
+                if bloc.get("type") != "D-1":
+                    continue
+                for point in bloc.get("values", []):
+                    dates.append(point["start_date"])
+                    valeurs.append(point["value"])
+            if verbeux:
+                print(f"  {curseur:%Y-%m-%d} -> {tranche_fin:%Y-%m-%d} : "
+                      f"{len(dates)} points")
+            if dates:
+                morceaux.append(pd.DataFrame({"timestamp": dates, "y_pred": valeurs}))
+            curseur = tranche_fin
+
+        if not morceaux:
+            raise ValueError(f"Aucune prévision RTE (D-1) sur {start_date} -> {end_date}")
+
+        df = pd.concat(morceaux, ignore_index=True)
+        df["timestamp"] = pd.to_datetime(df["timestamp"],
+                                         format="%Y-%m-%dT%H:%M:%S%z", utc=True)
+        df = df.set_index("timestamp").sort_index()
+        df = df[~df.index.duplicated(keep="last")].resample("h").mean().dropna()
+        df.index = df.index.tz_localize(None)
+        df.index.name = "timestamp"
+        return df
+
+    except Exception as e:
+        raise ForecastingException(e, sys)
+
+
+def _offset_paris_url(moment: datetime) -> str:
+    """Décalage UTC de Paris à cette date, encodé pour une URL (`%2B01:00`).
+
+    Le `+` est encodé en `%2B` : non échappé, il serait interprété comme un espace
+    dans une chaîne de requête, et RTE rejetterait la borne.
+    """
+    decalage = moment.replace(tzinfo=ZoneInfo("Europe/Paris")).utcoffset()
+    heures = int(decalage.total_seconds() // 3600)
+    return f"%2B{heures:02d}:00"
 
 
 def extract_conso_forecast_rte(target_date: str) -> pd.DataFrame:
@@ -260,7 +355,23 @@ def extract_conso_forecast_rte(target_date: str) -> pd.DataFrame:
         start = target - timedelta(days=1)
         end = target + timedelta(days=1)
 
-        url = f"{BASE_URL}&start_date={start.isoformat()}%2B02:00&end_date={end.isoformat()}%2B02:00"
+        # Décalage RÉEL de Paris à chaque borne, jamais +02:00 en dur.
+        #
+        # L'offset était figé à l'heure d'été. En hiver (+01:00), RTE ne renvoyait
+        # alors qu'UNE journée -- et pas celle demandée : le filtre sur la date
+        # locale, juste en dessous, vidait donc le résultat. `dates` étant non
+        # vide, le garde-fou `if not dates` ne se déclenchait pas : la fonction
+        # rendait un DataFrame VIDE, `run()` persistait 0 ligne et journalisait un
+        # SUCCÈS. Le DAG `fetch_rte_forecast` aurait ainsi échoué en silence de
+        # fin octobre à fin mars, sans qu'aucune alerte ne se lève. Mesuré :
+        # 96 points renvoyés avec +02:00 contre 192 avec +01:00 sur 2026-01-18,
+        # 2025-12-10 et 2025-02-05.
+        #
+        # Les deux bornes sont calculées séparément : une fenêtre de 2 jours peut
+        # enjamber un changement d'heure (derniers dimanches de mars et d'octobre).
+        url = (f"{BASE_URL}"
+               f"&start_date={start.isoformat()}{_offset_paris_url(start)}"
+               f"&end_date={end.isoformat()}{_offset_paris_url(end)}")
         response = requests.get(url, headers=headers)
         if response.status_code != 200:
             raise ValueError(f"Requête prévision RTE échouée : {response.text}")
@@ -327,6 +438,91 @@ def extract_temperature(start_date, end_date, var_name="temp"):
     raise ForecastingException(e, sys)
 
 
+def extract_temperature_france(start_date, end_date):
+    """Température France pondérée sur 17 stations (colonne `temp_fr`).
+
+    Complète `extract_temperature`, qui n'interroge qu'une station (Paris via
+    LAT/LON). Mesuré par backtesting à origine glissante
+    (`python -m scripts.evaluate_features`) : **-2,1 % de MAE supplémentaires
+    sur la consommation, gain tenu sur 5 folds sur 6**, une fois le levier
+    calendrier déjà appliqué.
+
+    La station unique reste extraite en parallèle : les deux colonnes cohabitent
+    dans `observations`, ce qui permet de rejouer une comparaison à tout moment.
+    """
+    try:
+        from pipeline_prevision.utils.main_utils.temperature_france import (
+            temperature_france,
+        )
+
+        start = datetime.strptime(start_date + " 00:00", "%Y-%m-%d %H:%M")
+        end = datetime.strptime(end_date + " 23:00", "%Y-%m-%d %H:%M")
+        serie, _, qualite = temperature_france(start, end)
+
+        faibles = qualite.attrs.get("heures_faibles", 0)
+        if faibles:
+            # Trop de stations manquantes : la moyenne pondérée n'est plus
+            # représentative. On le trace au lieu de le laisser passer -- une
+            # pondération dégradée est indétectable en aval.
+            logging.warning(
+                "temp_fr : %d heures sous le seuil de poids disponible "
+                "(stations manquantes, moyenne renormalisée)", faibles)
+
+        return pd.DataFrame({"temp_fr": serie.astype(float)})
+
+    except Exception as e:
+        raise ForecastingException(e, sys)
+
+
+def extract_temperature_openmeteo(start_date, end_date):
+    """Couple Open-Meteo : `temp_fr_om` (observé) et `temp_fr_prev` (prévu J-1).
+
+    Même indice national pondéré que `temp_fr` (mêmes 17 villes, mêmes poids),
+    mais sur la grille Open-Meteo, et surtout décliné en DEUX séries issues de la
+    MÊME source. C'est ce qui rend exploitable la feature qui porte le signal,
+    l'écart `temp_prev(cible) - temp_om(origine)` : le biais entre grille
+    Open-Meteo et stations Meteostat varie de 0,78 °C selon l'heure et de 0,63 °C
+    selon le niveau de température, donc croiser les sources y injecterait ce
+    décalage à la place du signal (cf. `prevision_temperature_france.py`).
+
+    Sans ces colonnes, le modèle n'a aucune température future en entrée — l'angle
+    mort qui nous faisait perdre 15 % de MAE contre RTE en bascule thermique.
+
+    **Non bloquant, délibérément.** Une panne d'Open-Meteo ne doit pas emporter
+    l'ingestion RTE/Meteostat, qui porte les cibles elles-mêmes : on trace et on
+    rend un cadre vide. L'upsert protège l'existant (COALESCE, cf.
+    `upsert_observations`) et la prochaine exécution horaire rattrape le trou.
+
+    Sur le vintage de `temp_fr_prev` : rejouer une fenêtre déjà ingérée est sans
+    danger. `previous_day1` est un fait historique figé — ce que le modèle météo
+    prédisait la veille pour cette heure-là ne change plus. Les heures encore à
+    venir reviennent NaN et l'upsert les laisse tranquilles.
+    """
+    try:
+        from pipeline_prevision.utils.main_utils.prevision_temperature_france import (
+            analyse_france, archive_prevision_france,
+        )
+
+        start = datetime.strptime(start_date + " 00:00", "%Y-%m-%d %H:%M")
+        end = datetime.strptime(end_date + " 23:00", "%Y-%m-%d %H:%M")
+
+        observe = analyse_france(start, end)
+        prevu = archive_prevision_france(start, end, lead_jours=1)
+        return pd.DataFrame({
+            "temp_fr_om": observe.astype(float),
+            "temp_fr_prev": prevu.astype(float),
+        })
+
+    except Exception as e:
+        logging.warning(
+            "Open-Meteo indisponible (%s) : `temp_fr_om`/`temp_fr_prev` non "
+            "actualisées sur %s -> %s. Les valeurs déjà en base sont conservées ; "
+            "si le trou persiste, les features de température cible se "
+            "désactiveront et le modèle redeviendra aveugle à la météo future.",
+            e, start_date, end_date)
+        return pd.DataFrame(columns=["temp_fr_om", "temp_fr_prev"], dtype=float)
+
+
 def extract_production(start_date, end_date):
     
     try:
@@ -354,7 +550,10 @@ def extract_production(start_date, end_date):
                     }
 
         for start, end in daterange(start_date, end_date, FIVE_MONTHS):
-            url = f"{BASE_URL}&start_date={start.isoformat()}%2B02:00&end_date={end.isoformat()}%2B02:00"
+            # Même correctif que pour la consommation : offset réel de Paris et
+            # non +02:00 figé, sinon 24 h perdues par fenêtre en heure d'hiver.
+            url = (f"{BASE_URL}&start_date={start.isoformat()}{_offset_paris_url(start)}"
+                   f"&end_date={end.isoformat()}{_offset_paris_url(end)}")
             response = requests.get(url, headers=headers)
 
             if response.status_code == 200:
@@ -435,6 +634,17 @@ def concat_all_data(start_date, end_date):
         temp_start = (datetime.strptime(start_date, "%Y-%m-%d") - margin).strftime("%Y-%m-%d")
         temp_end = (datetime.strptime(end_date, "%Y-%m-%d") + margin).strftime("%Y-%m-%d")
         df_temp = extract_temperature(temp_start, temp_end)
+        # Même marge d'un jour : `temp_fr` alimente les mêmes features de
+        # température (lags jusqu'à 168 h), un NaN de tête aurait le même effet.
+        df_temp = df_temp.join(
+            extract_temperature_france(temp_start, temp_end), how="outer")
+        # Couple Open-Meteo (observé + prévu J-1). Même marge, mêmes lags en aval.
+        # Sans cette ligne les deux colonnes resteraient figées au backfill
+        # initial : chaque nouvelle heure arriverait à NULL, et comme ce sont
+        # précisément les heures récentes qui servent d'origine à la prévision,
+        # le forecaster reculerait d'origine jour après jour.
+        df_temp = df_temp.join(
+            extract_temperature_openmeteo(temp_start, temp_end), how="outer")
         df_prod = extract_production(start_date, end_date)
         df_prod["timestamp"] = pd.to_datetime(df_prod["timestamp"], format="%Y-%m-%d %H:%M:%S")
         df_prod.set_index("timestamp", inplace=True)

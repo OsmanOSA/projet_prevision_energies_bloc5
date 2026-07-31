@@ -1,0 +1,72 @@
+{
+  "SOLAR": {
+    "sans": {
+      "coverage": 0.938592982055092,
+      "mean_width": 4005.4372105408274
+    },
+    "actuel": {
+      "coverage": 0.9385263077685069,
+      "mean_width": 4010.518232733552
+    },
+    "causal": {
+      "coverage": 0.9385358326665905,
+      "mean_width": 4060.656133433007
+    }
+  },
+  "BIOMASS": {
+    "sans": {
+      "coverage": 0.9215243646892978,
+      "mean_width": 110.14828555231666
+    },
+    "actuel": {
+      "coverage": 0.9214767401988798,
+      "mean_width": 108.27457084641492
+    },
+    "causal": {
+      "coverage": 0.920448051205852,
+      "mean_width": 111.68349441193776
+    }
+  },
+  "WIND_ONSHORE": {
+    "sans": {
+      "coverage": 0.9296014782641826,
+      "mean_width": 9341.122644198464
+    },
+    "actuel": {
+      "coverage": 0.9290871337676687,
+      "mean_width": 9282.923810567954
+    },
+    "causal": {
+      "coverage": 0.9292300072389226,
+      "mean_width": 9420.980210996559
+    }
+  },
+  "NUCLEAR": {
+    "sans": {
+      "coverage": 0.9238103402293596,
+      "mean_width": 6772.747523894463
+    },
+    "actuel": {
+      "coverage": 0.9242484855412048,
+      "mean_width": 6685.66958181057
+    },
+    "causal": {
+      "coverage": 0.9239913132929478,
+      "mean_width": 6832.796811710414
+    }
+  },
+  "consommation_totale": {
+    "sans": {
+      "coverage": 0.9286775631500743,
+      "mean_width": 7608.905357442396
+    },
+    "actuel": {
+      "coverage": 0.927429801501124,
+      "mean_width": 7381.59407845662
+    },
+    "causal": {
+      "coverage": 0.9274774259915419,
+      "mean_width": 7630.408207620012
+    }
+  }
+}

@@ -73,20 +73,24 @@ def overview():
     _, peak_conso_delta = windowed_delta(obs_all, "consommation_totale", days, agg="max")
     _, peak_prod_delta = windowed_delta(obs_all, "production_total", days, agg="max")
 
+    # Fenêtre de comparaison nommée explicitement dans les infobulles : le
+    # badge compare aux `days` jours qui précèdent la fenêtre affichée.
+    periode = f"les {days} jours précédents"
+
     c1, c2, c3, c4, c5 = st.columns(5)
     with c1:
         kpi_card("Consommation moy.", f"{avg_conso/1000:,.2f} GW" if pd.notna(avg_conso) else "—",
-                 delta_pct=conso_delta, higher_is_better=False)
+                 delta_pct=conso_delta, higher_is_better=False, period_label=periode)
     with c2:
         kpi_card("Pic de conso.", f"{peak_conso/1000:,.2f} GW" if pd.notna(peak_conso) else "—",
-                 delta_pct=peak_conso_delta, higher_is_better=False,
+                 delta_pct=peak_conso_delta, higher_is_better=False, period_label=periode,
                  sub=peak_hour.strftime("%d/%m %Hh") if peak_hour is not None else "")
     with c3:
         kpi_card("Production suivie moy.", f"{avg_prod/1000:,.2f} GW" if pd.notna(avg_prod) else "—",
-                 delta_pct=prod_delta)
+                 delta_pct=prod_delta, period_label=periode)
     with c4:
         kpi_card("Pic de production", f"{peak_prod/1000:,.2f} GW" if pd.notna(peak_prod) else "—",
-                 delta_pct=peak_prod_delta,
+                 delta_pct=peak_prod_delta, period_label=periode,
                  sub=peak_prod_hour.strftime("%d/%m %Hh") if peak_prod_hour is not None else "")
     with c5:
         kpi_card("Écart moyen (partiel)",
