@@ -1,0 +1,202 @@
+{
+  "SOLAR": {
+    "null_mae_sel": 376.88049243286906,
+    "null_mae_conf": 780.5005152754006,
+    "null_harm_rate": 0.0,
+    "best": {
+      "lambda": 0.9,
+      "kappa": 0.25,
+      "cap": 0.02,
+      "window": 720,
+      "half_life_h": 6.578813478960585,
+      "mae_sel": 379.7603781495666,
+      "mae_conf": 777.9295992326969,
+      "gain_sel_pct": -0.764137644298607,
+      "gain_conf_pct": 0.32939325373751893,
+      "ci95_daily_gain_conf": [
+        -0.1982606245436428,
+        5.103628504806409
+      ],
+      "harm_rate": 0.4526036970243463,
+      "passes_kill_test": false
+    },
+    "current": {
+      "lambda": 0.99,
+      "kappa": 0.5,
+      "cap": 0.05,
+      "window": 168,
+      "half_life_h": 68.96756393652842,
+      "mae_sel": 390.34359976514185,
+      "mae_conf": 801.516083479765,
+      "gain_sel_pct": -3.572248392418684,
+      "gain_conf_pct": -2.692575827057466,
+      "ci95_daily_gain_conf": [
+        -26.137717628742585,
+        -14.326262872269698
+      ],
+      "harm_rate": 0.5712447400060114,
+      "passes_kill_test": false
+    },
+    "n_configs": 312
+  },
+  "BIOMASS": {
+    "null_mae_sel": 11.287985171792062,
+    "null_mae_conf": 13.932907736242498,
+    "null_harm_rate": 0.0,
+    "best": {
+      "lambda": 0.9,
+      "kappa": 0.75,
+      "cap": Infinity,
+      "window": 24,
+      "half_life_h": 6.578813478960585,
+      "mae_sel": 9.916409701358637,
+      "mae_conf": 12.274701761333482,
+      "gain_sel_pct": 12.150755423216742,
+      "gain_conf_pct": 11.9013633499895,
+      "ci95_daily_gain_conf": [
+        0.5015527460574327,
+        2.6666389487203026
+      ],
+      "harm_rate": 0.44284452960625187,
+      "passes_kill_test": true
+    },
+    "current": {
+      "lambda": 0.99,
+      "kappa": 0.5,
+      "cap": 0.05,
+      "window": 168,
+      "half_life_h": 68.96756393652842,
+      "mae_sel": 11.450903416153205,
+      "mae_conf": 13.974368437558812,
+      "gain_sel_pct": -1.4432889650516585,
+      "gain_conf_pct": -0.29757393145198224,
+      "ci95_daily_gain_conf": [
+        -0.2746663465823704,
+        0.1383533636857267
+      ],
+      "harm_rate": 0.4895833333333333,
+      "passes_kill_test": false
+    },
+    "n_configs": 312
+  },
+  "WIND_ONSHORE": {
+    "null_mae_sel": 2335.2088843390966,
+    "null_mae_conf": 1659.6197989071866,
+    "null_harm_rate": 0.0,
+    "best": {
+      "lambda": 0.9,
+      "kappa": 1.0,
+      "cap": Infinity,
+      "window": 24,
+      "half_life_h": 6.578813478960585,
+      "mae_sel": 1805.0390940259522,
+      "mae_conf": 1268.1633509815827,
+      "gain_sel_pct": 22.703313346771175,
+      "gain_conf_pct": 23.58711604810735,
+      "ci95_daily_gain_conf": [
+        332.97850428069864,
+        456.0177018419246
+      ],
+      "harm_rate": 0.3882814848211602,
+      "passes_kill_test": true
+    },
+    "current": {
+      "lambda": 0.99,
+      "kappa": 0.5,
+      "cap": 0.05,
+      "window": 168,
+      "half_life_h": 68.96756393652842,
+      "mae_sel": 2311.9059034005218,
+      "mae_conf": 1636.5523919081172,
+      "gain_sel_pct": 0.9978970658622668,
+      "gain_conf_pct": 1.3899211743712991,
+      "ci95_daily_gain_conf": [
+        9.52979939220602,
+        36.535065839875756
+      ],
+      "harm_rate": 0.43634467989179443,
+      "passes_kill_test": true
+    },
+    "n_configs": 312
+  },
+  "NUCLEAR": {
+    "null_mae_sel": 1040.7929448866175,
+    "null_mae_conf": 1425.3419063475237,
+    "null_harm_rate": 0.0,
+    "best": {
+      "lambda": 0.9,
+      "kappa": 1.0,
+      "cap": Infinity,
+      "window": 24,
+      "half_life_h": 6.578813478960585,
+      "mae_sel": 800.4811426553999,
+      "mae_conf": 1182.0326816575473,
+      "gain_sel_pct": 23.08929969326385,
+      "gain_conf_pct": 17.070235822467517,
+      "ci95_daily_gain_conf": [
+        176.1805085583747,
+        303.2797587514773
+      ],
+      "harm_rate": 0.3929873008716561,
+      "passes_kill_test": true
+    },
+    "current": {
+      "lambda": 0.99,
+      "kappa": 0.5,
+      "cap": 0.05,
+      "window": 168,
+      "half_life_h": 68.96756393652842,
+      "mae_sel": 994.2097146824451,
+      "mae_conf": 1402.1251646667642,
+      "gain_sel_pct": 4.475744232609794,
+      "gain_conf_pct": 1.6288542122677767,
+      "ci95_daily_gain_conf": [
+        4.134317043542478,
+        35.55824460732156
+      ],
+      "harm_rate": 0.42697061917643525,
+      "passes_kill_test": true
+    },
+    "n_configs": 312
+  },
+  "consommation_totale": {
+    "null_mae_sel": 1587.6034351340627,
+    "null_mae_conf": 1234.7930000418542,
+    "null_harm_rate": 0.0,
+    "best": {
+      "lambda": 0.9,
+      "kappa": 1.0,
+      "cap": Infinity,
+      "window": 24,
+      "half_life_h": 6.578813478960585,
+      "mae_sel": 1136.314109850881,
+      "mae_conf": 1013.5854207153423,
+      "gain_sel_pct": 28.42582192101853,
+      "gain_conf_pct": 17.91454756538253,
+      "ci95_daily_gain_conf": [
+        167.14721947036148,
+        298.5152966712243
+      ],
+      "harm_rate": 0.4050289299669372,
+      "passes_kill_test": true
+    },
+    "current": {
+      "lambda": 0.99,
+      "kappa": 0.5,
+      "cap": 0.05,
+      "window": 168,
+      "half_life_h": 68.96756393652842,
+      "mae_sel": 1494.573926300715,
+      "mae_conf": 1213.370410961668,
+      "gain_sel_pct": 5.859744743213664,
+      "gain_conf_pct": 1.7349133886780974,
+      "ci95_daily_gain_conf": [
+        4.847986054353449,
+        45.83038799494622
+      ],
+      "harm_rate": 0.44334235046588516,
+      "passes_kill_test": true
+    },
+    "n_configs": 312
+  }
+}

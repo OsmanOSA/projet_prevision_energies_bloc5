@@ -1,0 +1,60 @@
+{
+  "fenetre": [
+    "2026-01-18 00:00:00",
+    "2026-07-26 00:00:00"
+  ],
+  "cible": "consommation_totale",
+  "heures_origine": [
+    21,
+    22,
+    23
+  ],
+  "regimes": {
+    "A. stable (<2 C)": {
+      "origines": 381,
+      "mae_champion": 967.26,
+      "mae_challenger": 817.05,
+      "gain_pct": 15.53,
+      "ic95_ecart_mw": [
+        -212.39,
+        -98.87
+      ]
+    },
+    "B. transition (2-4 C)": {
+      "origines": 175,
+      "mae_champion": 1085.93,
+      "mae_challenger": 913.88,
+      "gain_pct": 15.84,
+      "ic95_ecart_mw": [
+        -236.85,
+        -110.51
+      ]
+    },
+    "C. bascule (>4 C)": {
+      "origines": 11,
+      "mae_champion": 1207.43,
+      "mae_challenger": 970.53,
+      "gain_pct": 19.62,
+      "ic95_ecart_mw": [
+        null,
+        null
+      ]
+    }
+  },
+  "global": {
+    "origines": 567,
+    "gain_pct": 15.73,
+    "ic95_ecart_mw": [
+      -207.29,
+      -116.68
+    ]
+  },
+  "amplitude_inter_regimes": {
+    "champion": 240.17,
+    "challenger": 153.48
+  },
+  "corr_delta_biais": {
+    "champion": 0.368,
+    "challenger": 0.392
+  }
+}

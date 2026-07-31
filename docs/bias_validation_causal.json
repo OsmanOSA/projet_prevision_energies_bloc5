@@ -1,0 +1,43 @@
+{
+  "SOLAR": {
+    "null_mae_sel": 376.88049243286906,
+    "null_mae_conf": 780.5005152754006,
+    "null_harm_rate": 0.0,
+    "best": {
+      "lambda": 0.995,
+      "kappa": 0.25,
+      "cap": 0.02,
+      "window": 720,
+      "half_life_h": 138.28257298606084,
+      "mae_sel": 382.9132330475748,
+      "mae_conf": 791.3997105449649,
+      "gain_sel_pct": -1.6007038665659545,
+      "gain_conf_pct": -1.3964366526674883,
+      "ci95_daily_gain_conf": [
+        -12.968848479121371,
+        -7.875438924767119
+      ],
+      "harm_rate": 0.6161613315299068,
+      "passes_kill_test": false
+    },
+    "current": {
+      "lambda": 0.99,
+      "kappa": 0.5,
+      "cap": 0.05,
+      "window": 168,
+      "half_life_h": 68.96756393652842,
+      "mae_sel": 394.09032565340465,
+      "mae_conf": 815.942588961555,
+      "gain_sel_pct": -4.566390027098855,
+      "gain_conf_pct": -4.540941740909494,
+      "ci95_daily_gain_conf": [
+        -41.621901180400805,
+        -26.950853556996634
+      ],
+      "harm_rate": 0.6145645476405169,
+      "passes_kill_test": false
+    },
+    "n_configs": 312,
+    "shift_mode": "causal (h origines)"
+  }
+}

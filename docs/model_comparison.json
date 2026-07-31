@@ -1,0 +1,88 @@
+{
+  "window": [
+    "2026-06-01 00:00:00",
+    "2026-07-26 00:00:00"
+  ],
+  "targets": {
+    "SOLAR": {
+      "champion_mae": 838.4957923716939,
+      "champion_mae_persistence": 7305.080936159475,
+      "champion_gain_pct": 88.52174534821076,
+      "champion_n": 31704,
+      "challenger_mae": 843.0515325179323,
+      "challenger_mae_persistence": 7305.080936159475,
+      "challenger_gain_pct": 88.4593813554494,
+      "challenger_n": 31704,
+      "delta_mae_pct": -0.5433229585270061,
+      "ci95_daily_gain": [
+        -26.17422867361971,
+        12.76585179801637
+      ],
+      "verdict": "nul"
+    },
+    "BIOMASS": {
+      "champion_mae": 4.914332629218397,
+      "champion_mae_persistence": 5.82277735722096,
+      "champion_gain_pct": 15.601570732839019,
+      "champion_n": 31704,
+      "challenger_mae": 4.879986930698367,
+      "challenger_mae_persistence": 5.82277735722096,
+      "challenger_gain_pct": 16.191421527622325,
+      "challenger_n": 31704,
+      "delta_mae_pct": 0.6988883559860469,
+      "ci95_daily_gain": [
+        0.007937911180142592,
+        0.06885473262267319
+      ],
+      "verdict": "gagne"
+    },
+    "WIND_ONSHORE": {
+      "champion_mae": 1158.8166117548417,
+      "champion_mae_persistence": 1694.5666161998486,
+      "champion_gain_pct": 31.61575351026644,
+      "champion_n": 31704,
+      "challenger_mae": 1171.5745023330962,
+      "challenger_mae_persistence": 1694.5666161998486,
+      "challenger_gain_pct": 30.862883103385375,
+      "challenger_n": 31704,
+      "delta_mae_pct": -1.100941292076817,
+      "ci95_daily_gain": [
+        -23.391935359739307,
+        0.4878763147571187
+      ],
+      "verdict": "nul"
+    },
+    "NUCLEAR": {
+      "champion_mae": 1337.8042337730087,
+      "champion_mae_persistence": 2255.834258558331,
+      "champion_gain_pct": 40.695810044662636,
+      "champion_n": 31704,
+      "challenger_mae": 1340.8634245995772,
+      "challenger_mae_persistence": 2255.834258558331,
+      "challenger_gain_pct": 40.56019765137788,
+      "challenger_n": 31704,
+      "delta_mae_pct": -0.22867253289673603,
+      "ci95_daily_gain": [
+        -20.31846595395793,
+        16.809881993419655
+      ],
+      "verdict": "nul"
+    },
+    "consommation_totale": {
+      "champion_mae": 1047.0288045424122,
+      "champion_mae_persistence": 5457.050361678864,
+      "champion_gain_pct": 80.8132830897992,
+      "champion_n": 31704,
+      "challenger_mae": 1052.2114514463176,
+      "challenger_mae_persistence": 5457.050361678864,
+      "challenger_gain_pct": 80.71831151064174,
+      "challenger_n": 31704,
+      "delta_mae_pct": -0.49498608647833475,
+      "ci95_daily_gain": [
+        -22.625070976015667,
+        19.856094032105492
+      ],
+      "verdict": "nul"
+    }
+  }
+}
