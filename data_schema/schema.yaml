@@ -2,6 +2,9 @@ columns:
   - production_total: float64
   - consommation_totale: float64
   - temp: float64
+  - temp_fr: float64
+  - temp_fr_om: float64
+  - temp_fr_prev: float64
   - SOLAR: float64
   - BIOMASS: float64
   - WIND_ONSHORE: float64
@@ -11,6 +14,9 @@ numeric_columns:
   - production_total
   - consommation_totale
   - temp
+  - temp_fr
+  - temp_fr_om
+  - temp_fr_prev
   - SOLAR
   - BIOMASS
   - WIND_ONSHORE
@@ -23,6 +29,20 @@ numeric_columns:
 # (cf. discussion), pas encore utilisées comme cibles par model_trainer.py.
 plausible_bounds:
   temp: {min: -30, max: 50}
+  # temp_fr : moyenne nationale pondérée sur 17 stations (temperature_france.py).
+  # Une moyenne pondérée est mécaniquement plus resserrée qu'une station isolée
+  # (observé 2023-2026 : -4,3 à +37,8 °C), donc les bornes sont plus étroites
+  # que celles de `temp` -- une valeur hors de cet intervalle signale une panne
+  # de pondération (station manquante non renormalisée), pas une vague de froid.
+  temp_fr: {min: -20, max: 45}
+  # temp_fr_om / temp_fr_prev : même indice national pondéré, mais sur la grille
+  # Open-Meteo -- observé et PRÉVU à échéance J-1 (cf. prevision_temperature_
+  # france.py). Mêmes bornes que temp_fr : c'est la même grandeur physique, donc
+  # un dépassement signale la même panne de pondération, pas un extrême météo.
+  # `temp_fr_prev` étant une prévision, elle est mécaniquement encore plus lissée
+  # que l'observé -- la borne n'a donc aucune raison d'être plus large.
+  temp_fr_om: {min: -20, max: 45}
+  temp_fr_prev: {min: -20, max: 45}
   production_total: {min: 0, max: 100000}
   consommation_totale: {min: 0, max: 120000}
   SOLAR: {min: 0, max: 25000}

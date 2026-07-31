@@ -27,9 +27,11 @@ from pipeline_prevision.logging.logger import logging
 from pipeline_prevision.exception.exception import ForecastingException
 from pipeline_prevision.utils.main_utils.utils import load_object
 from pipeline_prevision.utils.main_utils.feature_engineering import (
-    add_target_features, build_series_by_target, seasonal_baseline,
+    build_series_by_target, select_temperature, select_forecast_temperature,
 )
-from pipeline_prevision.utils.ml_utils.model.local_forecaster import TARGETS
+from pipeline_prevision.utils.ml_utils.model.local_forecaster import (
+    TARGETS, _direct_prediction, get_anchor,
+)
 from pipeline_prevision.db import get_observations, log_run
 
 CHAMPION_DIR = os.path.join(_ROOT, "final_models")
@@ -64,7 +66,7 @@ def _train_challenger():
                  data_transformation_artifact=transformation).initiate_model_trainer()
 
 
-def _backtest_mae(model_dir, series_by_target, temp) -> float:
+def _backtest_mae(model_dir, series_by_target, temp, temp_prev=None) -> float:
     """MAE moyen (5 cibles x horizons représentatifs) sur les EVAL_WINDOWS
     dernières origines réelles. Renvoie +inf si le modèle est absent ou
     incompatible (ex. ancien format, avant cette architecture) -> traité
@@ -81,7 +83,8 @@ def _backtest_mae(model_dir, series_by_target, temp) -> float:
             delta_col = f"{prefix}_delta_1"
             series = series_by_target[target]
 
-            features_df, _ = build_origin_feature_frame(series_by_target, temp, target)
+            features_df, _ = build_origin_feature_frame(series_by_target, temp, target,
+                                                        temp_prev=temp_prev)
 
             for horizon in EVAL_HORIZONS:
                 model = target_composite["models"][horizon]
@@ -95,13 +98,10 @@ def _backtest_mae(model_dir, series_by_target, temp) -> float:
                     continue
                 y_true = actual_future.loc[frame.index].to_numpy()
 
-                X = add_target_features(frame[feature_columns], horizon, delta_col)
-                residual_pred = model.predict(X)
-                persistence = frame[f"{prefix}_0"].to_numpy()
-                seasonal_value = seasonal_baseline(frame, horizon, prefix)
-                direct = persistence + alpha * residual_pred
-                y_pred = (1 - seasonal_weight) * direct + seasonal_weight * seasonal_value
-                y_pred = np.maximum(y_pred, 0.0)
+                y_pred = _direct_prediction(
+                    model, alpha, seasonal_weight, frame[feature_columns], horizon, prefix,
+                    delta_col, get_anchor(target_composite, horizon),
+                )
 
                 errors.append(np.abs(y_pred - y_true))
 
@@ -162,10 +162,15 @@ def run(margin: float = 0.0) -> bool:
             raise ValueError("Aucune observation pour l'évaluation")
         obs = obs.sort_index()
         series_by_target = build_series_by_target(obs)
-        temp = obs["temp"].astype(float)
+        temp = select_temperature(obs)
+        # Backtest sur des origines PASSÉES : l'archive à échéance J-1 est la
+        # bonne source, et la seule cohérente avec l'entraînement. Pas d'appel à
+        # l'API live ici — il fournirait au challenger une prévision plus fraîche
+        # que celle sur laquelle il a appris, et fausserait la comparaison.
+        temp_prev = select_forecast_temperature(obs)
 
-        challenger_mae = _backtest_mae(CANDIDATE_DIR, series_by_target, temp)
-        champion_mae = _backtest_mae(CHAMPION_DIR, series_by_target, temp)
+        challenger_mae = _backtest_mae(CANDIDATE_DIR, series_by_target, temp, temp_prev)
+        champion_mae = _backtest_mae(CHAMPION_DIR, series_by_target, temp, temp_prev)
 
         promoted = challenger_mae < champion_mae * (1 - margin)
         if promoted:

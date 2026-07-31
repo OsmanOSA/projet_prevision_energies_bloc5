@@ -180,6 +180,11 @@ docker compose config -q                            # valide docker-compose.yml
 
 ## Modèles et validation
 
+> La formalisation mathématique complète de l'architecture — features,
+> équation de prévision, intervalles conformes, protocole de validation et
+> limites structurelles — est dans
+> [`docs/ARCHITECTURE_MODELE.md`](docs/ARCHITECTURE_MODELE.md).
+
 - **Cible** : production par filière suivie (solaire, biomasse, éolien
   terrestre, nucléaire) et consommation totale — cinq cibles, chacune avec
   son propre jeu de modèles. La température est une variable exogène

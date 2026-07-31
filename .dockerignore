@@ -1,16 +1,50 @@
+# Contexte envoyé au démon de build. Tout ce qui n'est pas exclu ici est
+# transféré au builder à chaque `docker compose build`, puis gravé dans une
+# couche par le `COPY . /app` du Dockerfile.
+
+# --- Secrets ---------------------------------------------------------------
+# `.env` porte les identifiants RTE, la clé secrète Airflow et les mots de
+# passe admin. Sans cette exclusion ils se retrouvent en clair dans une couche
+# d'image, extractibles par quiconque obtient l'image — y compris si le
+# fichier est supprimé dans une couche ultérieure. Les variables sont
+# injectées au runtime par docker-compose, jamais au build.
+# (`.env.example` ne contient que des gabarits et n'est pas concerné.)
+.env
+*.env
+
+# --- Environnements et caches ----------------------------------------------
 .venv
 venv
 .git
 __pycache__
 **/__pycache__
 *.pyc
+.pytest_cache
+.ipynb_checkpoints
+
+# --- Artefacts lourds ------------------------------------------------------
+# Plusieurs Go inutiles au build, et cause de l'échec du builder (EOF sur
+# `COPY . /app`). Les services montent le projet en volume (`.:/app` et
+# `.:/opt/energia` dans docker-compose.yml) : ces répertoires sont donc
+# fournis au runtime par l'hôte. Le Dockerfile documente déjà que
+# `final_models/` arrive par volume ou artefact de déploiement.
+Artifacts
+final_models
+candidate_models
+models_archive
+mlruns
+mlartifacts
+
+# --- Données volumineuses inutiles au build --------------------------------
+# `datasets/data.csv` est conservé (jeu d'entraînement versionné, lu par
+# scripts/seed_observations.py) ; les archives sont régénérables.
+datasets/archive_*
+
+# --- Journaux et divers ----------------------------------------------------
 logs
 airflow/logs
 airflow/plugins
-mlruns
+*.log
 notebooks
 catboost_info
 **/catboost_info
-*.log
-.pytest_cache
-.ipynb_checkpoints

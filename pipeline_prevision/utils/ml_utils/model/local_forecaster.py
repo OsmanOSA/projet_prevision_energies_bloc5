@@ -26,10 +26,13 @@ import sys
 import numpy as np
 import pandas as pd
 
+from pipeline_prevision.logging.logger import logging
 from pipeline_prevision.utils.main_utils.utils import load_object
 from pipeline_prevision.utils.main_utils.feature_engineering import (
     HORIZON_MAX, TARGET_PREFIXES, add_target_features, build_origin_feature_frame,
     build_series_by_target, seasonal_baseline,
+    DEFAULT_ANCHOR, anchor_values, complementary_anchor, select_temperature,
+    select_forecast_temperature,
 )
 from pipeline_prevision.exception.exception import ForecastingException
 
@@ -50,23 +53,32 @@ def derive_production_total(per_target: dict) -> dict:
     if all("y_lower" in per_target[s] for s in PRODUCTION_SOURCES):
         result["y_lower"] = sum(per_target[s]["y_lower"] for s in PRODUCTION_SOURCES)
         result["y_upper"] = sum(per_target[s]["y_upper"] for s in PRODUCTION_SOURCES)
+    if all("y_decision" in per_target[s] for s in PRODUCTION_SOURCES):
+        result["y_decision"] = sum(per_target[s]["y_decision"] for s in PRODUCTION_SOURCES)
     return result
 
-# --- Correction de niveau dynamique (biais EWMA par horizon) ----------------
-# Les modèles montrent souvent un profil horaire correct mais un biais de
-# niveau persistant (cf. carte « Biais moyen » du dashboard). Cette correction
-# apprend ce biais sur les erreurs SIGNÉES de la sortie finale (modèle +
-# alpha + seasonal_weight, cf. `_direct_prediction`) -- jamais sur le résidu
-# brut du modèle avant cette correction, sinon on corrigerait deux fois la
-# même chose. Walk-forward strict (chaque point ne voit que les erreurs
-# passées, jamais la sienne) : pas de fuite, même rejoué sur tout un
-# historique de backtest. Réduite (shrinkage) et plafonnée (% de la valeur
-# réelle récente) plutôt qu'appliquée brute : une vraie dérive du modèle doit
-# remonter via retrain_on_degradation, pas être rustinée indéfiniment ici.
-BIAS_LAMBDA = 0.99        # EWMA à cadence horaire (origines) -> mémoire ~3 jours
-BIAS_SHRINKAGE = 0.5      # n'applique que la moitié du biais estimé
-BIAS_CAP_FRACTION = 0.05  # plafond : ±5 % de la valeur réelle récente (rolling 7 j)
-BIAS_TYPICAL_WINDOW = 24 * 7
+# --- Pas de correction de niveau dynamique (retirée, mesurée perdante) ------
+# Une correction de biais EWMA par horizon a existé ici (constantes BIAS_*,
+# `_live_bias_correction` / `_walkforward_bias_correction`). Elle a été
+# retirée après mesure -- ne pas la réintroduire sans rejouer
+# `scripts/validate_bias_params.py`.
+#
+# 1. La variante walk-forward FUYAIT. Ses séries sont indexées par ORIGINE
+#    (`series.shift(-horizon)`), donc son `.shift(1)` reculait d'une origine,
+#    soit 1 h -- alors que l'erreur de l'origine `i-k` n'est observable qu'à
+#    `i-k+h`. Il aurait fallu `.shift(horizon)`. À h=24, la correction lisait
+#    un réalisé arrivant 23 h plus tard, ce qui gonflait `backtest_direct` et
+#    les résidus de calibration conforme.
+# 2. Une fois le décalage rendu causal, la correction perd sur les 5 cibles
+#    (gain sur moitié de confirmation : SOLAR -4.5 %, BIOMASS -3.3 %,
+#    WIND_ONSHORE -0.6 %, NUCLEAR -1.1 %, consommation -1.2 % ; taux de
+#    correction nuisible ~50 %). Le grid-search causal converge vers
+#    « ne rien corriger » sur les quatre paramètres à la fois.
+# 3. Signature la plus nette : à h=1, seul horizon où l'ancien `.shift(1)`
+#    était déjà causal, la correction n'apportait rien (-0.01 % à -0.87 %).
+#
+# Un biais de niveau qui persiste doit remonter via retrain_on_degradation,
+# pas être rustiné en ligne.
 
 # --- Trous de température ---------------------------------------------------
 # `temp` est exogène (Meteostat) et publiée avec un retard variable. Un seul
@@ -80,6 +92,48 @@ BIAS_TYPICAL_WINDOW = 24 * 7
 # d'ingestion. Dans ce cas l'origine recule simplement d'une heure ou deux, ce
 # que `forecast_origin` rend explicite et que `scripts/forecast.py` contrôle.
 TEMP_MAX_GAP_HOURS = 6
+
+# --- Quantile de décision (§ 9 du notebook de comparaison) -------------------
+# Une prévision ponctuelle minimisant la MAE vise la MÉDIANE. Or la décision
+# adossée à cette prévision -- un engagement de capacité -- n'a pas un coût
+# symétrique : sous-estimer la consommation oblige à un équilibrage d'urgence,
+# surestimer n'immobilise que de la réserve. L'optimum n'est donc pas la
+# médiane mais le quantile `c_sous / (c_sous + c_sur)`.
+#
+# Mesuré sur backtest à origine glissante (6 folds, calibration hors fold) :
+# viser q0,762 au lieu de la médiane réduit le coût de déséquilibre de **19 %**
+# (~10 400 €/h, soit ~91 M€/an aux coûts ci-dessous) -- **tout en DÉGRADANT la
+# MAE de 21 %**. C'est le point : optimiser l'erreur et optimiser la décision
+# ne sont pas le même problème.
+#
+# Les coûts sont des ordres de grandeur du marché d'ajustement français ; ils
+# sont surchargeables par variable d'environnement. Tout changement de coût
+# change le quantile optimal -- rejouer le § 9 du notebook avant d'y toucher.
+COST_UNDER_FORECAST = float(os.getenv("COST_UNDER_FORECAST", "80"))  # €/MWh manquant
+COST_OVER_FORECAST = float(os.getenv("COST_OVER_FORECAST", "25"))    # €/MWh excédentaire
+
+# L'asymétrie ci-dessus décrit un ENGAGEMENT DE CAPACITÉ, donc la consommation.
+# L'appliquer aux filières de production reviendrait à sur-annoncer
+# systématiquement la production disponible -- exactement l'erreur inverse de
+# celle qu'on cherche à éviter.
+#
+# ATTENTION -- les autres cibles n'ont PAS de quantile par défaut, et surtout
+# pas 0,5. La médiane des résidus signés n'est pas nulle (mesuré : +836 MW sur
+# NUCLEAR à h+24), donc viser q0,5 revient à appliquer une correction de niveau
+# -- précisément celle qui a été retirée de ce module après mesure, parce
+# qu'elle perdait sur les cinq cibles (cf. l'encadré ci-dessus). Sans règle de
+# décision explicite, on ne retouche rien : `y_decision` vaut `y_pred`.
+DECISION_QUANTILES = {
+    "consommation_totale": COST_UNDER_FORECAST / (COST_UNDER_FORECAST + COST_OVER_FORECAST),
+}
+
+
+def decision_quantile(target: str) -> float | None:
+    """Quantile de décision de la cible, ou None si aucune règle n'est définie.
+
+    None signifie « ne pas retoucher la prévision », et non « viser la médiane ».
+    """
+    return DECISION_QUANTILES.get(target)
 
 # Racine du projet : .../pipeline_prevision/utils/ml_utils/model/local_forecaster.py -> 5 niveaux
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
@@ -131,11 +185,54 @@ def _validate_target(target: str):
         raise ValueError(f"Cible inconnue : {target} (attendu : {TARGETS})")
 
 
+def _temperature_prevue(observations: pd.DataFrame) -> pd.Series | None:
+    """Température prévue à l'heure cible, pour l'inférence.
+
+    Deux morceaux, et l'ordre de priorité compte :
+
+    - le PASSÉ vient de `observations.temp_fr_prev`, l'archive à échéance J-1 sur
+      laquelle le modèle a été entraîné ;
+    - le FUTUR vient de l'API live, seule à couvrir t+1..t+24 — la table
+      `observations` n'a aucune ligne au-delà de la dernière observation, donc la
+      colonne archivée ne peut structurellement pas renseigner l'horizon utile.
+
+    L'archive est prioritaire là où elle existe (`combine_first`) : laisser la
+    prévision live, plus fraîche, écraser les heures passées mélangerait les
+    millésimes entre l'entraînement et la calibration des intervalles conformes,
+    qui se calent justement sur les origines récentes.
+
+    En cas d'échec réseau on retourne l'archive seule. Les features de l'origine
+    la plus récente restent alors NaN, et le forecaster s'ancre sur une origine
+    plus ancienne mais complète (cf. `valid_features` / `forecast_origin`) : une
+    prévision légèrement décalée plutôt qu'aucune prévision.
+    """
+    archive = select_forecast_temperature(observations)
+
+    try:
+        from pipeline_prevision.utils.main_utils.prevision_temperature_france import (
+            prevision_france,
+        )
+        derniere = pd.Timestamp(observations.index.max())
+        live = prevision_france(
+            (derniere - pd.Timedelta(hours=6)).to_pydatetime(),
+            (derniere + pd.Timedelta(hours=HORIZON_MAX + 1)).to_pydatetime(),
+        )
+    except Exception as e:
+        logging.warning(
+            "Prévision de température live indisponible (%s) : repli sur l'archive "
+            "seule. L'origine la plus récente sera incomplète et le forecaster "
+            "s'ancrera plus tôt.", e)
+        return archive
+
+    return archive.combine_first(live) if archive is not None else live
+
+
 def _build_series(observations: pd.DataFrame):
     series_by_target = build_series_by_target(observations)
-    temp = pd.to_numeric(observations["temp"], errors="coerce")
+    temp = select_temperature(observations)
     temp = temp.interpolate(method="linear", limit=TEMP_MAX_GAP_HOURS, limit_area="inside")
-    return series_by_target, temp
+    temp_prev = _temperature_prevue(observations)
+    return series_by_target, temp, temp_prev
 
 
 def forecast_origin(prediction: pd.DataFrame) -> pd.Timestamp:
@@ -154,50 +251,49 @@ def forecast_origin(prediction: pd.DataFrame) -> pd.Timestamp:
     return prediction.index[0] - pd.Timedelta(hours=int(prediction["horizon_h"].iloc[0]))
 
 
+def get_anchor(composite: dict, horizon: int) -> str:
+    """Ancre retenue à l'entraînement pour cet horizon.
+
+    Les artefacts entraînés avant la sélection d'ancre n'ont pas la clé
+    `anchors` : ils sont tous ancrés sur la persistance, d'où ce repli qui
+    laisse un `model.pkl` ancien produire exactement les mêmes prévisions
+    qu'avant.
+    """
+    return composite.get("anchors", {}).get(horizon, DEFAULT_ANCHOR)
+
+
+def _align_to_model(model, X: pd.DataFrame) -> pd.DataFrame:
+    """Restreint X aux colonnes que le modèle a réellement vues à l'entraînement.
+
+    `add_target_features` construit les variables ancrées sur l'heure cible
+    APRÈS la sélection par `feature_columns` : tout enrichissement de cette
+    fonction change donc la largeur de X et casse les artefacts déjà entraînés
+    (« number of features in data (182) is not the same as in training data
+    (168) »). LightGBM conserve le nom de ses colonnes -- on s'y aligne, ce qui
+    laisse un ancien champion prédire exactement comme avant tout en permettant
+    aux modèles réentraînés d'exploiter les nouvelles variables.
+    """
+    attendues = getattr(model, "feature_name_", None)
+    if not attendues or list(X.columns) == list(attendues):
+        return X
+    manquantes = [c for c in attendues if c not in X.columns]
+    if manquantes:
+        raise ValueError(
+            f"features attendues par le modèle et absentes du jeu construit : "
+            f"{manquantes[:5]}{'...' if len(manquantes) > 5 else ''}")
+    return X[list(attendues)]
+
+
 def _direct_prediction(model, alpha: float, seasonal_weight: float,
-                       feature_row: pd.DataFrame, horizon: int, prefix: str, delta_col: str):
-    X = add_target_features(feature_row, horizon, delta_col)
+                       feature_row: pd.DataFrame, horizon: int, prefix: str, delta_col: str,
+                       anchor: str = DEFAULT_ANCHOR):
+    X = _align_to_model(model, add_target_features(feature_row, horizon, delta_col))
     residual_pred = model.predict(X)
-    persistence = feature_row[f"{prefix}_0"].to_numpy()
-    seasonal_value = seasonal_baseline(feature_row, horizon, prefix)
-    direct = persistence + alpha * residual_pred
-    blended = (1 - seasonal_weight) * direct + seasonal_weight * seasonal_value
+    base = anchor_values(feature_row, horizon, prefix, anchor)
+    blend = anchor_values(feature_row, horizon, prefix, complementary_anchor(anchor))
+    direct = base + alpha * residual_pred
+    blended = (1 - seasonal_weight) * direct + seasonal_weight * blend
     return np.maximum(blended, 0.0)
-
-
-def _walkforward_bias_correction(y_true: pd.Series, y_pred_raw: np.ndarray) -> np.ndarray:
-    """Correction de niveau causale, point par point, sur une série ordonnée
-    chronologiquement : à la position i, ne dépend que des erreurs signées
-    aux positions < i (jamais de la sienne) -> utilisable telle quelle sur un
-    historique de backtest sans fuite.
-    """
-    if len(y_true) == 0:
-        return np.array([])
-
-    error = pd.Series(y_true.to_numpy() - y_pred_raw, index=y_true.index)
-    bias = error.shift(1).ewm(alpha=1 - BIAS_LAMBDA, adjust=False).mean().fillna(0.0)
-
-    typical = y_true.shift(1).abs().rolling(BIAS_TYPICAL_WINDOW, min_periods=24).mean().fillna(0.0)
-    cap = BIAS_CAP_FRACTION * typical
-
-    return np.clip(BIAS_SHRINKAGE * bias.to_numpy(), -cap.to_numpy(), cap.to_numpy())
-
-
-def _live_bias_correction(y_true: pd.Series, y_pred_raw: np.ndarray) -> float:
-    """Correction pour une prévision live (pas encore réalisée) : même
-    principe, mais utilise tout l'historique de calibration connu -- le point
-    live n'a par définition pas encore de réalisé, donc aucune fuite.
-    """
-    if len(y_true) == 0:
-        return 0.0
-
-    error = pd.Series(y_true.to_numpy() - y_pred_raw, index=y_true.index)
-    bias = float(error.ewm(alpha=1 - BIAS_LAMBDA, adjust=False).mean().iloc[-1])
-    typical = float(y_true.tail(BIAS_TYPICAL_WINDOW).abs().mean())
-    if not pd.notna(typical) or typical == 0:
-        return 0.0
-    cap = BIAS_CAP_FRACTION * typical
-    return float(np.clip(BIAS_SHRINKAGE * bias, -cap, cap))
 
 
 def predict_direct(observations: pd.DataFrame, target: str, horizons=None) -> pd.DataFrame:
@@ -217,8 +313,9 @@ def predict_direct(observations: pd.DataFrame, target: str, horizons=None) -> pd
         prefix = composite["prefix"]
         delta_col = f"{prefix}_delta_1"
 
-        series_by_target, temp = _build_series(observations)
-        features_df, _ = build_origin_feature_frame(series_by_target, temp, target)
+        series_by_target, temp, temp_prev = _build_series(observations)
+        features_df, _ = build_origin_feature_frame(series_by_target, temp, target,
+                                                    temp_prev=temp_prev)
         features_df = features_df.dropna(subset=feature_columns)
         if features_df.empty:
             raise ValueError(f"Historique insuffisant pour calculer les features de {target}")
@@ -232,7 +329,8 @@ def predict_direct(observations: pd.DataFrame, target: str, horizons=None) -> pd
             alpha = composite["alphas"][horizon]
             seasonal_weight = composite["seasonal_weights"][horizon]
             y_pred = _direct_prediction(
-                model, alpha, seasonal_weight, origin_row[feature_columns], horizon, prefix, delta_col
+                model, alpha, seasonal_weight, origin_row[feature_columns], horizon, prefix, delta_col,
+                get_anchor(composite, horizon),
             )[0]
             rows.append({
                 "target_ts": origin_ts + pd.Timedelta(hours=horizon),
@@ -250,33 +348,36 @@ def predict_direct(observations: pd.DataFrame, target: str, horizons=None) -> pd
 
 def predict_with_conformal_intervals(observations: pd.DataFrame, target: str, horizons=None,
                                      alpha: float = 0.05, n_calib: int = 200) -> pd.DataFrame:
-    """Prévision directe + correction de biais + intervalles conformes,
-    par horizon.
+    """Prévision directe + intervalles conformes, par horizon.
 
-    Ordre strict (cf. `_walkforward_bias_correction`) :
-      1. prévision brute finale = modèle + alpha + seasonal_weight ;
-      2. + correction de niveau dynamique (biais EWMA récent, réduite et
-         plafonnée) -> prévision opérationnelle, celle qui est persistée ;
-      3. intervalle conforme calibré AUTOUR de la prévision opérationnelle
-         (les résidus de calibration sont recalculés sur les prévisions
-         historiques elles aussi corrigées, pour rester cohérents).
+    La prévision persistée est exactement la sortie du modèle (modèle + alpha
+    + seasonal_weight) : plus aucune correction de niveau ne s'intercale ici
+    (cf. l'encadré en tête de module).
 
     Calibration : pour chaque horizon, on compare aux `n_calib` dernières
     origines historiques dont la vraie valeur cible est déjà connue (jamais
-    de rollout) -> résidus |réel - prévu corrigé|, demi-largeur =
-    quantile(1-alpha).
+    de rollout) -> résidus |réel - prévu|, demi-largeur = quantile(1-alpha).
+
+    Trois sorties, à ne pas confondre :
+      - `y_pred`     : la prévision du modèle, sans retouche (minimise la MAE) ;
+      - `y_lower`/`y_upper` : intervalle conforme symétrique à 1-alpha ;
+      - `y_decision` : la valeur à ENGAGER, décalée au quantile de décision
+        propre à la cible (cf. `decision_quantile`). Elle est délibérément moins
+        bonne en MAE et meilleure en coût -- c'est le § 9 du notebook.
     """
     try:
         _validate_target(target)
         horizons = list(horizons) if horizons is not None else list(range(1, HORIZON_MAX + 1))
+        q_decision = decision_quantile(target)
 
         composite = get_models()[target]
         feature_columns = composite["feature_columns"]
         prefix = composite["prefix"]
         delta_col = f"{prefix}_delta_1"
 
-        series_by_target, temp = _build_series(observations)
-        features_df, _ = build_origin_feature_frame(series_by_target, temp, target)
+        series_by_target, temp, temp_prev = _build_series(observations)
+        features_df, _ = build_origin_feature_frame(series_by_target, temp, target,
+                                                    temp_prev=temp_prev)
         series = series_by_target[target]
 
         valid_features = features_df[feature_columns].notna().all(axis=1)
@@ -296,37 +397,44 @@ def predict_with_conformal_intervals(observations: pd.DataFrame, target: str, ho
 
             y_pred_live = _direct_prediction(
                 model, alpha_correction, seasonal_weight, origin_row[feature_columns],
-                horizon, prefix, delta_col,
+                horizon, prefix, delta_col, get_anchor(composite, horizon),
             )[0]
 
             half_width = np.nan
-            correction_live = 0.0
+            decision_shift = np.nan
             if not calib_frame.empty:
                 y_pred_calib = _direct_prediction(
                     model, alpha_correction, seasonal_weight, calib_frame[feature_columns],
-                    horizon, prefix, delta_col,
+                    horizon, prefix, delta_col, get_anchor(composite, horizon),
                 )
-                # Biais appris sur l'erreur de la sortie finale non corrigée
-                # (calib_actual - y_pred_calib) : jamais sur le résidu brut
-                # d'avant alpha/seasonal_weight, pour ne pas corriger deux fois.
-                correction_live = _live_bias_correction(calib_actual, y_pred_calib)
-                y_pred_calib_corrected = y_pred_calib + _walkforward_bias_correction(calib_actual, y_pred_calib)
-                residuals = np.abs(calib_actual.to_numpy() - y_pred_calib_corrected)
-                recent_residuals = residuals[-n_calib:]
-                if len(recent_residuals):
-                    half_width = float(np.quantile(recent_residuals, 1 - alpha))
+                # Résidus SIGNÉS : l'intervalle conforme n'a besoin que de leur
+                # valeur absolue, mais le quantile de décision a besoin du signe
+                # -- c'est toute la différence entre « à quelle distance ? » et
+                # « de quel côté se tromper ? ».
+                signed = (calib_actual.to_numpy() - y_pred_calib)[-n_calib:]
+                if len(signed):
+                    half_width = float(np.quantile(np.abs(signed), 1 - alpha))
+                    if q_decision is not None:
+                        decision_shift = float(np.quantile(signed, q_decision))
 
-            y_pred_corrected = max(y_pred_live + correction_live, 0.0)
+            y_pred_final = max(y_pred_live, 0.0)
+            y_decision = (max(y_pred_live + decision_shift, 0.0)
+                          if pd.notna(decision_shift) else y_pred_final)
 
-            y_lower = max(y_pred_corrected - half_width, 0.0) if pd.notna(half_width) else np.nan
-            y_upper = y_pred_corrected + half_width if pd.notna(half_width) else np.nan
+            y_lower = max(y_pred_final - half_width, 0.0) if pd.notna(half_width) else np.nan
+            y_upper = y_pred_final + half_width if pd.notna(half_width) else np.nan
 
             rows.append({
                 "target_ts": origin_ts + pd.Timedelta(hours=horizon),
                 "horizon_h": horizon,
-                "y_pred": float(y_pred_corrected),
+                "y_pred": float(y_pred_final),
                 "y_lower": y_lower,
                 "y_upper": y_upper,
+                "y_decision": float(y_decision),
+                # NaN plutôt que None : garde la colonne en float, sans quoi
+                # elle devient de type objet et casse concat/persistance dès
+                # qu'une cible sans règle de décision est dans le lot.
+                "decision_q": float(q_decision) if q_decision is not None else np.nan,
             })
 
         return pd.DataFrame(rows).set_index("target_ts")
@@ -356,8 +464,9 @@ def backtest_direct(observations: pd.DataFrame, target: str, horizon: int, days:
         alpha = composite["alphas"][horizon]
         seasonal_weight = composite["seasonal_weights"][horizon]
 
-        series_by_target, temp = _build_series(observations)
-        features_df, _ = build_origin_feature_frame(series_by_target, temp, target)
+        series_by_target, temp, temp_prev = _build_series(observations)
+        features_df, _ = build_origin_feature_frame(series_by_target, temp, target,
+                                                    temp_prev=temp_prev)
         series = series_by_target[target]
         actual_future = series.shift(-horizon)
 
@@ -368,19 +477,18 @@ def backtest_direct(observations: pd.DataFrame, target: str, horizon: int, days:
         if frame.empty:
             return pd.DataFrame()
 
-        # Correction calculée sur tout l'historique dispo (jamais seulement la
-        # fenêtre `days` affichée) : la bande walk-forward a besoin de son
-        # propre passé pour "chauffer" avant le début de la période visible,
-        # sinon elle repartirait de zéro à chaque rechargement du graphe.
-        # Le découpage à `days` n'intervient qu'à la toute fin, sur le résultat.
-        y_pred = _direct_prediction(model, alpha, seasonal_weight, frame[feature_columns], horizon, prefix, delta_col)
-        correction = _walkforward_bias_correction(y_true, y_pred)
-        y_pred_corrected = np.maximum(y_pred + correction, 0.0)
+        # Prévision calculée sur tout l'historique disponible, puis découpée à
+        # `days` seulement à la fin : le résultat d'une origine ne dépend que
+        # de ses propres features, donc la fenêtre affichée ne change aucune
+        # valeur -- mais garder le calcul global évite de refaire dépendre le
+        # graphe de son point de départ si un état glissant réapparaissait ici.
+        y_pred = _direct_prediction(model, alpha, seasonal_weight, frame[feature_columns], horizon, prefix,
+                                    delta_col, get_anchor(composite, horizon))
         target_ts = frame.index + pd.Timedelta(hours=horizon)
 
         result = pd.DataFrame({
             "target_ts": target_ts,
-            "y_pred": y_pred_corrected,
+            "y_pred": np.maximum(y_pred, 0.0),
             "y_true": y_true.to_numpy(),
         }).set_index("target_ts")
 

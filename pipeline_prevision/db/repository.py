@@ -22,6 +22,13 @@ from pipeline_prevision.exception.exception import ForecastingException
 # normalise en snake_case.
 DF_TO_DB = {
     "temp": "temp",
+    "temp_fr": "temp_fr",       # moyenne pondérée 17 stations (cf. temperature_france.py)
+    # Couple Open-Meteo de source unique : observé + prévu J-1 sur la même
+    # grille, cf. le commentaire détaillé dans models.py. `temp_fr_prev` porte un
+    # contrat de vintage (jamais rafraîchie) qu'un producteur amont ne doit pas
+    # violer : seul `scripts/backfill_prevision_temperature.py` l'alimente.
+    "temp_fr_om": "temp_fr_om",
+    "temp_fr_prev": "temp_fr_prev",
     "production_total": "production_total",
     "SOLAR": "solar",
     "BIOMASS": "biomass",
@@ -52,6 +59,27 @@ def init_db() -> None:
             conn.execute(text(
                 "ALTER TABLE observations ADD COLUMN IF NOT EXISTS production_total DOUBLE PRECISION"
             ))
+            # Température France pondérée (17 stations) : ajoutée à côté de
+            # `temp` (station unique) et non à sa place, pour pouvoir rejouer
+            # la comparaison des deux sur l'historique déjà en base.
+            conn.execute(text(
+                "ALTER TABLE observations ADD COLUMN IF NOT EXISTS temp_fr DOUBLE PRECISION"
+            ))
+            # Couple Open-Meteo (observé + prévu J-1, même grille). Additif :
+            # l'historique déjà en base reste à NULL jusqu'au backfill, et
+            # `select_temperature` se replie sur `temp_fr` tant que la couverture
+            # est insuffisante — donc aucune rupture pour les modèles en place.
+            for col in ("temp_fr_om", "temp_fr_prev"):
+                conn.execute(text(
+                    f"ALTER TABLE observations ADD COLUMN IF NOT EXISTS {col} DOUBLE PRECISION"
+                ))
+            # Quantile de décision (§ 9) : la prévision engagée, distincte de
+            # la prévision ponctuelle. Additif, les lignes antérieures restent
+            # à NULL sans perturber l'évaluation existante.
+            for col in ("y_decision", "decision_q"):
+                conn.execute(text(
+                    f"ALTER TABLE forecasts ADD COLUMN IF NOT EXISTS {col} DOUBLE PRECISION"
+                ))
             per_source_cols = {"solar", "biomass", "wind_onshore", "nuclear"}
             for col in per_source_cols:
                 conn.execute(text(
@@ -146,12 +174,17 @@ def get_observations(start=None, end=None) -> pd.DataFrame:
 def save_forecasts(pred_df: pd.DataFrame, origin_ts, run_ts=None,
                    model_version: str | None = None,
                    lower_df: pd.DataFrame | None = None,
-                   upper_df: pd.DataFrame | None = None) -> int:
+                   upper_df: pd.DataFrame | None = None,
+                   decision_df: pd.DataFrame | None = None,
+                   decision_q: dict | None = None) -> int:
     """Persiste une prévision multi-horizon.
 
     pred_df : indexé par l'horodatage cible, une colonne par variable.
     origin_ts : dernier point observé (origine de la prévision).
     lower_df / upper_df : bornes d'intervalle optionnelles (même forme).
+    decision_df : prévision engagée au quantile de décision (même forme) ;
+    decision_q : quantile appliqué, par variable (traçabilité -- sans lui on ne
+    peut plus interpréter y_decision a posteriori si les coûts changent).
     Conflit sur (origin_ts, horizon_h, variable) -> mise à jour.
     """
     try:
@@ -194,6 +227,10 @@ def save_forecasts(pred_df: pd.DataFrame, origin_ts, run_ts=None,
                     rec["y_lower"] = float(lower_df.loc[target_ts, var])
                 if upper_df is not None and var in upper_df.columns:
                     rec["y_upper"] = float(upper_df.loc[target_ts, var])
+                if decision_df is not None and var in decision_df.columns:
+                    rec["y_decision"] = float(decision_df.loc[target_ts, var])
+                if decision_q is not None and var in decision_q:
+                    rec["decision_q"] = float(decision_q[var])
                 records.append(rec)
 
         if not records:
@@ -206,6 +243,8 @@ def save_forecasts(pred_df: pd.DataFrame, origin_ts, run_ts=None,
                 "run_ts": stmt.excluded.run_ts,
                 "target_ts": stmt.excluded.target_ts,
                 "y_pred": stmt.excluded.y_pred,
+                "y_decision": stmt.excluded.y_decision,
+                "decision_q": stmt.excluded.decision_q,
                 "y_lower": stmt.excluded.y_lower,
                 "y_upper": stmt.excluded.y_upper,
                 "model_version": stmt.excluded.model_version,
